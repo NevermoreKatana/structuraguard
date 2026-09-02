@@ -933,13 +933,21 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _run_checked(command: list[str], *, cwd: Path) -> None:
+def _run_checked(
+    command: list[str],
+    *,
+    cwd: Path,
+    project_environment: Path | None = None,
+) -> None:
     print(f"+ {shlex.join(command)}")
+    environment = _offline_environment()
+    if project_environment is not None:
+        environment["UV_PROJECT_ENVIRONMENT"] = os.fspath(project_environment)
     try:
         completed = subprocess.run(
             command,
             cwd=cwd,
-            env=_offline_environment(),
+            env=environment,
             check=False,
             capture_output=True,
             text=True,
@@ -1097,7 +1105,6 @@ def _verify_installed_wheel(
     *,
     uv: Path,
     wheel: Path,
-    locked_runtime_requirements: tuple[str, ...],
     expected_runtime_versions: dict[str, str],
     temp_root: Path,
     repository_root: Path,
@@ -1111,17 +1118,22 @@ def _verify_installed_wheel(
     _run_checked(
         [
             os.fspath(uv),
-            "pip",
-            "install",
+            "sync",
             "--offline",
             "--no-config",
             "--no-python-downloads",
+            "--locked",
+            "--project",
+            os.fspath(repository_root),
+            "--package",
+            _DISTRIBUTION_NAME,
+            "--no-default-groups",
+            "--no-install-workspace",
             "--python",
             os.fspath(python),
-            "--no-deps",
-            *locked_runtime_requirements,
         ],
         cwd=temp_root,
+        project_environment=venv_dir,
     )
     _run_checked(
         [
@@ -1254,10 +1266,6 @@ def verify_distribution(dist_dir: Path) -> None:
         _verify_installed_wheel(
             uv=uv,
             wheel=wheel,
-            locked_runtime_requirements=tuple(
-                f"{package_name}=={version}"
-                for package_name, version in runtime_versions.items()
-            ),
             expected_runtime_versions=runtime_versions,
             temp_root=temp_root,
             repository_root=repository_root,

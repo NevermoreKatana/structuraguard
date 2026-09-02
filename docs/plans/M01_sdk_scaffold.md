@@ -1,7 +1,9 @@
 # План M01 «Каркас Python-пакета»
 
-Статус: локально выполнен и готов к ручному commit 2 сентября 2026
-года. Commit не создавался; remote GitHub Actions до push/PR не запускался.
+Статус: реализация M1 зафиксирована в commit `96dce13` 2 сентября
+2026 года. После первичного remote CI failure локально подготовлено и
+проверено исправление offline packaging gate; его commit, push и remote
+rerun ожидаются.
 
 ## Цель
 
@@ -131,9 +133,10 @@ contracts в последующих milestone.
   files, network/process/thread/event-loop, signals и logging side effects.
 - [x] 9. Root targets `lint`, `typecheck`, `test`, `docs` и `test-build` прошли
   в составе `make check`.
-- [x] 10. CI contract для pinned actions, lockfile, Python 3.12–3.14 и read-only
-  permissions покрыт `test_ci_contract.py`; remote execution остаётся
-  post-commit/post-push проверкой.
+- [ ] 10. CI contract для pinned actions, lockfile, Python 3.12–3.14 и read-only
+  permissions покрыт `test_ci_contract.py`. Найденная remote package-job
+  ошибка исправлена и воспроизведена локально в чистом uv cache;
+  checklist закрывается после remote rerun новой revision.
 
 ## Затронутые контракты
 
@@ -389,9 +392,11 @@ Distribution verifier на stdlib:
 1. проверяет количество, имена и contents wheel/sdist;
 2. собирает wheel повторно из sdist;
 3. создаёт временное virtualenv вне repository;
-4. устанавливает wheel не-editable способом;
-5. запускает `python -I` import/dependency probe;
-6. всегда очищает temporary directory.
+4. lock-native `uv sync` в offline-режиме устанавливает точную runtime closure
+   в это virtualenv, не полагаясь на registry-index cache;
+5. устанавливает проверяемый wheel не-editable способом и с `--no-deps`;
+6. запускает `python -I` import/dependency probe;
+7. всегда очищает temporary directory.
 
 Проверка:
 
@@ -496,6 +501,9 @@ git diff --check
 Фактически выполнено 2 сентября 2026 года:
 
 ```bash
+.venv/bin/python -B -m pytest -q packages/structuraguard/tests/packaging/test_distribution_verifier.py::test_wheel_smoke_does_not_resolve_runtime_by_name_offline
+.venv/bin/python -B -m pytest -q packages/structuraguard/tests/packaging
+make test-build
 make check
 uv run --isolated --python 3.13 --locked pytest -q
 uv run --isolated --python 3.14 --locked pytest -q
@@ -505,22 +513,51 @@ git diff --check
 git status --short --ignored
 ```
 
-`make check` завершён с `90 passed` на Python 3.12; Ruff, mypy strict,
-MkDocs strict, wheel/sdist rebuild, isolated non-editable install и оба
+Fresh-cache дефект воспроизведён отдельным диагностическим harness.
+Первый offline install ожидаемо вернул code 1 на старом verifier, а
+последняя команда прошла после исправления:
+
+```bash
+SG_UV_REPRO_ROOT="$(mktemp -d /tmp/structuraguard-uv-repro.XXXXXX)"
+UV_PROJECT_ENVIRONMENT="$SG_UV_REPRO_ROOT/synced" uv sync \
+  --all-packages --locked --group dev --cache-dir "$SG_UV_REPRO_ROOT/cache" \
+  --project .
+.venv/bin/python -m venv --without-pip "$SG_UV_REPRO_ROOT/pip-target"
+UV_CACHE_DIR="$SG_UV_REPRO_ROOT/cache" uv pip install --offline --no-config \
+  --no-python-downloads --python "$SG_UV_REPRO_ROOT/pip-target/bin/python" \
+  --no-deps annotated-types==0.8.0 pydantic==2.13.5 pydantic-core==2.46.5 \
+  typing-extensions==4.16.0 typing-inspection==0.4.4
+make build
+UV_CACHE_DIR="$SG_UV_REPRO_ROOT/cache" \
+  .venv/bin/python -B scripts/verify_distribution.py dist
+```
+
+Временный `SG_UV_REPRO_ROOT` удалён после диагностики.
+
+`make check` после исправления завершён с `91 passed` на Python 3.12;
+Ruff, mypy strict, MkDocs strict, wheel/sdist rebuild, isolated non-editable
+install и оба
 installed-wheel import probe прошли. Изолированные прогоны на Python
-3.13 и 3.14 завершились с `90 passed` каждый. Codex-pack validator вернул
-`errors=0` и одно warning об отсутствии `.codex/config.toml`; repository-local
-Codex config не входит в scope SDK scaffold, а validator считает warning
-неблокирующим. После финальной правки plan повторная MkDocs
+3.13 и 3.14 завершились с `91 passed` каждый. Codex-pack validator до
+параллельного переименования ТЗ вернул `errors=0` и одно warning об
+отсутствии `.codex/config.toml`; repository-local Codex config не входит в
+scope SDK scaffold. Текущий повторный запуск имеет `errors=0`, `warnings=2`:
+добавилось предупреждение об отсутствующем каноническом имени ТЗ из
+несвязанного in-progress rename. После финальной правки plan повторная MkDocs
 strict-сборка прошла. `git diff --check` и отдельный trailing-whitespace
 scan untracked-файлов не нашли ошибок. После очистки generated-artifact
 scan видит только игнорируемую `.venv/`; real secrets и debug artifacts не
 обнаружены.
 
-Осознанно не выполнены:
+Дополнительно воспроизведён CI-дефект: в чистом `UV_CACHE_DIR` после
+locked sync старый name-based `uv pip install --offline` не нашёл
+`annotated-types`. На том же cache lock-native sync и полный distribution
+verifier прошли без сети. Packaging regression suite: `20 passed`.
 
-- remote GitHub Actions — до ручного commit и push/PR нет remote
-  revision; workflow contract и Python matrix проверены локально;
+Ожидают внешнего подтверждения или не выполняются по scope:
+
+- remote GitHub Actions rerun — исправление ещё не зафиксировано и не
+  отправлено; initial package job воспроизведён локально и исправлен;
 - `make test-integration` и `make test-security` — targets намеренно не
   созданы: M1 не вводит parser/DB/LLM/runtime integration boundaries, а
   связанные с import/error security semantics regression tests входят в

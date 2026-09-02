@@ -5,7 +5,8 @@
 ## Текущая версия и milestone
 
 - Версия package: `0.1.0`.
-- Текущий milestone: `M1 — Каркас Python-пакета`, завершён и проверен.
+- Текущий milestone: `M1 — Каркас Python-пакета`; локальные gates прошли,
+  remote rerun packaging fix ожидается.
 - Активная ветка: `feat/m01-sdk-scaffold`.
 - Следующий milestone: `M2 — Доменные модели и contracts`.
 
@@ -43,19 +44,22 @@ dependency bundles и не означают наличие adapters.
 
 ## Последние успешные quality gates
 
-- `make check`: Ruff, mypy strict, `90 passed` на Python 3.12, MkDocs strict,
+- `make check`: Ruff, mypy strict, `91 passed` на Python 3.12, MkDocs strict,
   wheel/sdist build, rebuild wheel из sdist и installed-wheel smoke — успешно.
-- Изолированный pytest на Python 3.13: `90 passed`.
-- Изолированный pytest на Python 3.14: `90 passed`.
+- Изолированный pytest на Python 3.13: `91 passed`.
+- Изолированный pytest на Python 3.14: `91 passed`.
 - Копируемый пример M1 выполняется в subprocess и выводит
   `SDK_OPERATION_NOT_IMPLEMENTED`.
 
-Remote GitHub Actions в этой сессии не запускался. Workflow contract проверен
-локальным тестом; CI настроен на Python 3.12–3.14 и read-only permissions.
+Initial remote package job выявил, что name-based `uv pip install --offline`
+зависел от registry-index cache, который locked sync не обязан
+заполнять. Verifier переведён на lock-native offline sync; fix прошёл
+полный verifier в чистом cache. Remote rerun новой revision ожидается.
 
 ## Открытые блокеры
 
-Блокеров для завершения M1 нет.
+Локальных блокеров нет. Перед merge нужен успешный remote rerun
+packaging fix.
 
 ## Принятые архитектурные решения
 
