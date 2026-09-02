@@ -4,18 +4,23 @@
 from __future__ import annotations
 
 import argparse
+import re
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-import re
-import sys
-import tomllib
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LINK_RE = re.compile(r"\((references|scripts)/([^)#]+)(?:#[^)]+)?\)")
 PLAIN_REFERENCE_RE = re.compile(r"(?<![\w/])(references/[A-Za-z0-9_.\-/]+)")
 DANGEROUS_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bcurl\b[^\n|]*\|\s*(?:sh|bash)\b", re.I), "download-and-execute pipeline"),
-    (re.compile(r"\bwget\b[^\n|]*\|\s*(?:sh|bash)\b", re.I), "download-and-execute pipeline"),
+    (
+        re.compile(r"\bcurl\b[^\n|]*\|\s*(?:sh|bash)\b", re.I),
+        "download-and-execute pipeline",
+    ),
+    (
+        re.compile(r"\bwget\b[^\n|]*\|\s*(?:sh|bash)\b", re.I),
+        "download-and-execute pipeline",
+    ),
     (re.compile(r"\brm\s+-rf\s+/(?:\s|$)", re.I), "destructive root deletion"),
     (re.compile(r"\bgit\s+add\s+\.\s*$", re.I | re.M), "broad git staging"),
     (re.compile(r"--no-verify\b", re.I), "bypassing repository checks"),
@@ -62,7 +67,7 @@ def parse_frontmatter(path: Path) -> tuple[dict[str, str], str, str]:
         if not line or line[0].isspace() or ":" not in line:
             continue
         key, value = line.split(":", 1)
-        metadata[key.strip()] = value.strip().strip('"\'')
+        metadata[key.strip()] = value.strip().strip("\"'")
 
     body = "\n".join(lines[end + 1 :])
     return metadata, body, text
@@ -193,7 +198,9 @@ def validate(root: Path) -> list[Issue]:
         if not description:
             issues.append(Issue("ERROR", skill_file, "отсутствует description"))
         elif len(description) > 1024:
-            issues.append(Issue("ERROR", skill_file, "description длиннее 1024 символов"))
+            issues.append(
+                Issue("ERROR", skill_file, "description длиннее 1024 символов")
+            )
         else:
             descriptions.append(description)
 
@@ -209,7 +216,11 @@ def validate(root: Path) -> list[Issue]:
         line_count = text.count("\n") + 1
         if line_count > 500:
             issues.append(
-                Issue("WARNING", skill_file, f"{line_count} строк; рекомендовано менее 500")
+                Issue(
+                    "WARNING",
+                    skill_file,
+                    f"{line_count} строк; рекомендовано менее 500",
+                )
             )
         if len(text.encode("utf-8")) > 20_000:
             issues.append(
@@ -233,7 +244,9 @@ def validate(root: Path) -> list[Issue]:
 
         references_dir = skill_dir / "references"
         if references_dir.is_dir():
-            for target in sorted(path for path in references_dir.rglob("*") if path.is_file()):
+            for target in sorted(
+                path for path in references_dir.rglob("*") if path.is_file()
+            ):
                 if target not in referenced:
                     issues.append(
                         Issue(
@@ -245,9 +258,7 @@ def validate(root: Path) -> list[Issue]:
 
         for pattern, label in DANGEROUS_PATTERNS:
             if pattern.search(text):
-                issues.append(
-                    Issue("ERROR", skill_file, f"опасный шаблон: {label}")
-                )
+                issues.append(Issue("ERROR", skill_file, f"опасный шаблон: {label}"))
 
         issues.extend(validate_openai_metadata(skill_dir))
 
@@ -290,7 +301,9 @@ def display_path(path: Path, root: Path) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Валидирует StructuraGuard Codex pack.")
+    parser = argparse.ArgumentParser(
+        description="Валидирует StructuraGuard Codex pack."
+    )
     parser.add_argument("root", nargs="?", default=".", help="Корень репозитория.")
     args = parser.parse_args()
 

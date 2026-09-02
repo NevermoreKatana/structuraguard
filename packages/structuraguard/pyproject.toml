@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling>=1.28,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "structuraguard"
+version = "0.1.0"
+description = "Встраиваемый SDK для безопасного импорта данных в реляционные БД"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.13,<3",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+postgres = [
+    "SQLAlchemy>=2.0.40,<3",
+    "asyncpg>=0.30,<1",
+    "psycopg>=3.2,<4",
+]
+pdf = [
+    "PyMuPDF>=1.26,<2",
+]
+excel = [
+    "openpyxl>=3.1.5,<4",
+]
+office = [
+    "python-docx>=1.1.2,<2",
+]
+litellm = [
+    "litellm>=1.75,<2",
+]
+tika = [
+    "tika>=3.1,<4",
+]
+all = [
+    "SQLAlchemy>=2.0.40,<3",
+    "asyncpg>=0.30,<1",
+    "psycopg>=3.2,<4",
+    "PyMuPDF>=1.26,<2",
+    "openpyxl>=3.1.5,<4",
+    "python-docx>=1.1.2,<2",
+    "litellm>=1.75,<2",
+    "tika>=3.1,<4",
+]
+
+[project.urls]
+Repository = "https://github.com/NevermoreKatana/structuraguard"
+Documentation = "https://nevermorekatana.github.io/structuraguard/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/structuraguard"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/pyproject.toml",
+    "/src",
+]
+exclude = [
+    "**/.DS_Store",
+    "**/__pycache__/**",
+    "**/*.py[cod]",
+]

@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from pathlib import Path
 import re
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 
@@ -75,9 +75,7 @@ def find_sections(
     """Сначала ищет точный префикс, затем безопасный substring fallback."""
 
     needle = normalize(query)
-    normalized_titles = [
-        (section, normalize(section.title)) for section in sections
-    ]
+    normalized_titles = [(section, normalize(section.title)) for section in sections]
     precise_matches = [
         section
         for section, title in normalized_titles
@@ -95,17 +93,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Выводит только выбранные разделы ТЗ, "
-            "чтобы не загружать весь документ."
+            "Выводит только выбранные разделы ТЗ, чтобы не загружать весь документ."
         )
     )
     parser.add_argument(
         "queries",
         nargs="*",
-        help=(
-            "Подстроки заголовков, например "
-            "'FR-003' или 'M5. Database Inspector'."
-        ),
+        help=("Подстроки заголовков, например 'FR-003' или 'M5. Database Inspector'."),
     )
     parser.add_argument(
         "--file",
@@ -152,9 +146,7 @@ def main() -> int:
             continue
         selected.extend(matches)
 
-    unique = {
-        (section.start, section.end): section for section in selected
-    }
+    unique = {(section.start, section.end): section for section in selected}
     ordered = sorted(unique.values(), key=lambda section: section.start)
     if not ordered:
         return 1
