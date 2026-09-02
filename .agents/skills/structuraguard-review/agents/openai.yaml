@@ -1,0 +1,3 @@
+interface:
+  display_name: 'StructuraGuard: review'
+  short_description: Проверка correctness, security и compatibility

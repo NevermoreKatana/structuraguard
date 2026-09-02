@@ -1,0 +1,3 @@
+interface:
+  display_name: 'StructuraGuard: Python'
+  short_description: Типизированная реализация и рефакторинг SDK

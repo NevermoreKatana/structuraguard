@@ -1,0 +1,3 @@
+interface:
+  display_name: 'StructuraGuard: тесты'
+  short_description: Unit, contract, integration и property tests

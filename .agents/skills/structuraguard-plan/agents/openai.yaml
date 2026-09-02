@@ -1,0 +1,3 @@
+interface:
+  display_name: 'StructuraGuard: план'
+  short_description: Планирование сложного изменения без лишнего scope

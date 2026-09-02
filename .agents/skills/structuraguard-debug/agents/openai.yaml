@@ -1,0 +1,3 @@
+interface:
+  display_name: 'StructuraGuard: отладка'
+  short_description: Поиск первопричины и regression fix

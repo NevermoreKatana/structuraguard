@@ -1,0 +1,3 @@
+interface:
+  display_name: 'StructuraGuard: LLM'
+  short_description: Provider-neutral mapping и privacy routing
