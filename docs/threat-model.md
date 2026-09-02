@@ -2,18 +2,28 @@
 
 ## Статус документа
 
-Этот документ задаёт нормативную модель угроз для design baseline M0.
-StructuraGuard на этом этапе не содержит production-реализации. Поэтому каждый
-control в документе имеет одновременно два независимых статуса:
+Этот документ задаёт нормативную модель угроз для design baseline M0 и отмечает
+ограниченный runtime subset, подтверждённый в M1. Каждый control имеет два
+независимых статуса:
 
 - нормативный статус `REQUIRED`: control обязателен для приёмки затронутой
   возможности;
-- статус реализации `PLANNED`: реализация и проверочное evidence должны появиться
-  в указанном будущем milestone.
+- статус реализации `IMPLEMENTED` с milestone evidence либо `PLANNED`, если
+  реализация должна появиться в указанном будущем milestone.
 
-Отсутствие обязательного control приводит к явному отказу. Небезопасный fallback
-запрещён. Статус `PLANNED` нельзя трактовать как частичную защиту или как
-утверждение, что control уже работает.
+В M1 статус `IMPLEMENTED` имеют только два ограниченных controls:
+
+- import и constructors package code не читают environment/files, не обращаются
+  к сети и не меняют process-wide event-loop, thread, signal или logging state;
+- публичный `StructuraGuardError` ограничивает и санитизирует известные формы
+  credentials, сохраняет только имя класса `cause` и делает `details`
+  рекурсивно неизменяемыми.
+
+Redaction ошибки является defense-in-depth и не распознаёт произвольный secret
+под нейтральным именем. Caller обязан передавать только safe `message`, `details`
+и `run_id`. Pipeline, parser, DB, LLM, stores, audit и end-to-end output controls
+остаются `PLANNED`. Отсутствие обязательного control приводит к явному отказу;
+небезопасный fallback запрещён.
 
 Модель конкретизирует security boundary defaults из
 [ADR 0002](adr/0002-security-boundary-defaults.md). Scope продукта и форматы
@@ -260,8 +270,9 @@ source hash, сработавший limit и sanitized parser outcome. Raw paylo
 записывается в event.
 
 **Security outcome:** опасный или превышающий limits input не создаёт plan и не
-доходит до staging. Отказ получает machine-readable code; кроме закреплённых M0
-кодов остальные security codes должны быть определены в M2 до реализации.
+доходит до staging. Отказ получает machine-readable `error_code`;
+кроме закреплённых M0 кодов остальные security codes должны быть определены в M2
+до реализации.
 
 **Residual risk:** safe configuration не исключает parser zero-day; отдельная
 изоляция `TB-03` ограничивает blast radius.
@@ -551,8 +562,9 @@ exporter. Безопасность такого downstream использова�
 
 ## Security gates и состояния pipeline
 
-Названия состояний канонически определены в `docs/public-api.md`. Security gates
-обязательны в следующих точках:
+Названия состояний канонически определены в
+[разделе 25 ТЗ][spec-pipeline-statuses]. Security gates обязательны в следующих
+точках:
 
 1. `CREATED` → `SOURCE_PROBING`: validate input/policy, включая immutable
    path policy, и установить limits.
@@ -579,7 +591,7 @@ Security event после начала transaction требует rollback; term
 ## Контролируемые outcomes и error codes
 
 Status и error code — разные части contract. Status описывает итог run, а typed
-error содержит стабильный `code`, безопасный `message`, redacted `details`,
+error содержит стабильный `error_code`, безопасный `message`, redacted `details`,
 `run_id`, `retryable` и sanitized `cause`.
 
 - Strict/untrusted parser без sandbox: `REJECTED_SECURITY`,
@@ -683,7 +695,9 @@ tests обязаны проверять отсутствие фактическ�
 
 ## Остаточные риски и ограничения
 
-- Все controls пока `PLANNED`; M0 не предоставляет runtime protection.
+- Runtime protection M1 ограничена import/construction boundary и публичными
+  ошибками. Остальные controls этой модели остаются `PLANNED` до milestone
+  evidence.
 - Parser, sandbox runtime, DB driver и dependencies могут содержать zero-day.
 - PII detection и masking не гарантируют обнаружение косвенных identifiers.
 - Explicitly allowed LLM provider получает masked context и применяет собственные
@@ -709,3 +723,5 @@ tests обязаны проверять отсутствие фактическ�
   caller-provided stores за пределами проверяемых adapter contracts.
 - Заявление о реализованности controls до появления code, tests и review
   evidence соответствующего milestone.
+
+[spec-pipeline-statuses]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#25-статусы-pipeline

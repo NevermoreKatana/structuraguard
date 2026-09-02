@@ -1,8 +1,8 @@
 # Требования StructuraGuard SDK
 
-Статус: нормативный baseline milestone M0. Документ задаёт целевое поведение,
-но не подтверждает наличие реализации. Подтверждением требования считается
-только evidence, полученное в указанном milestone.
+Статус: нормативный baseline milestone M0 с уточнением поставки M1. Документ
+задаёт целевое поведение; наличие конкретной возможности подтверждает только
+evidence, полученное в указанном milestone.
 
 ## Нормативные обозначения
 
@@ -17,7 +17,7 @@
 [модели угроз](threat-model.md), а пользовательские сценарии и signatures — в
 [public API](public-api.md). Основание baseline —
 [план M0](plans/M00_requirements.md) и выбранные разделы
-[технического задания](../StructuraGuard_SDK_Technical_Specification.md).
+[технического задания](https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md).
 
 ## Назначение и граница продукта
 
@@ -392,7 +392,7 @@ archive extraction, CPU, memory, PIDs и concurrency также `MUST` быть 
 | `NFR-009` | SDK публикует typed events; backend выбирает caller |
 | `NFR-010` | Длительные операции поддерживают timeout, cancellation и cleanup |
 | `NFR-011` | Streaming, batch size, concurrency и pooling остаются bounded |
-| `NFR-012` | Ошибки typed и machine-readable, с `code` и safe details |
+| `NFR-012` | Ошибки typed и machine-readable, с `error_code` и safe details |
 
 Для `NFR-001` импорт `MUST NOT` запускать server/event loop/background thread,
 читать обязательные env variables, менять root logger, ставить signal handlers,
@@ -420,8 +420,9 @@ security.detected
 ```
 
 Event consumer `MUST NOT` менять security decision. Для `NFR-011` p95 `MUST`
-фиксироваться в benchmark report. Для `NFR-012` ошибка `MUST` содержать `code`,
-`message`, safe `details`, `run_id`, `retryable` и redacted `cause`.
+фиксироваться в benchmark report. Для `NFR-012` ошибка `MUST` содержать
+каноническое поле `error_code`, `message`, safe `details`, `run_id`, `retryable`
+и redacted `cause`.
 
 Для `NFR-010` истечение configured deadline до commit `MUST` завершать run
 состоянием `FAILED` и кодом `PROCESSING_TIMEOUT`, а явная cancellation caller —
@@ -432,6 +433,23 @@ commit timeout/cancellation не меняет data outcome задним числ
 отражаться как post-commit warning.
 
 ## Требования к поставке
+
+`M1-001` Distribution `structuraguard` `MUST` собираться в wheel и sdist из
+`packages/structuraguard`, устанавливаться в чистое окружение и содержать marker
+`py.typed`.
+
+`M1-002` Обычный `import structuraguard` `MUST` выполняться без I/O,
+чтения environment, создания event loop/thread и изменения process-wide
+state. Top-level exports `SDKConfig`, `AsyncStructuraGuard`, `StructuraGuard` и
+public exception hierarchy `MUST` разрешаться лениво; Pydantic
+загружается только при явном обращении к config или facade, а core
+StructuraGuard не читает environment.
+
+`M1-003` До появления соответствующего vertical slice публичные операции facade
+`MUST` завершаться `OperationNotImplementedError` с
+`error_code="SDK_OPERATION_NOT_IMPLEMENTED"`, а не возвращать успешный
+placeholder. Sync-операция, вызванная внутри активного event loop, `MUST` сначала
+завершаться `error_code="SYNC_API_IN_ASYNC_CONTEXT"`.
 
 `QA-001` До финальной приёмки `MUST` существовать unit, contract, integration и
 security test suites. Security suite `MUST` включать негативные сценарии parser,

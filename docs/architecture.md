@@ -1,7 +1,8 @@
 # Архитектура StructuraGuard
 
-Статус: нормативный baseline milestone M0. Документ задаёт обязательную целевую
-архитектуру, но не утверждает, что перечисленные компоненты уже реализованы.
+Статус: нормативный baseline milestone M0; package layout и доступный scaffold
+уточнены в M1. Целевые компоненты не считаются реализованными без milestone
+evidence.
 
 Термины `MUST`, `SHOULD` и `MAY` означают соответственно обязательное требование,
 рекомендацию с документируемым отклонением и допустимый вариант.
@@ -43,6 +44,31 @@ domain + contracts + ports
               |
 parser / database / LLM / validation / security / store adapters
 ```
+
+### Package layout M1
+
+Корень репозитория является виртуальным `uv` workspace и не создаёт второй
+distribution. Устанавливаемый package имеет единственный source of truth:
+
+```text
+packages/structuraguard/
+├── pyproject.toml
+├── src/structuraguard/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── exceptions.py
+│   ├── sdk.py
+│   ├── sync_sdk.py
+│   └── py.typed
+└── tests/
+```
+
+Root `pyproject.toml` владеет workspace, developer tools, docs groups и явным
+PEP 517 guard, отклоняющим попытку собрать корень как второй distribution;
+package metadata, runtime dependency и optional extras принадлежат
+`packages/structuraguard/pyproject.toml`. Core scaffold не импортирует optional
+dependencies. Новые domain, ports и adapters добавляются внутрь этого package,
+а не как параллельный Python-пакет.
 
 ### Слои
 
@@ -136,6 +162,12 @@ output остаются недоверенными данными.
 - создавать schema, tables, staging resources или другие persistent objects;
 - менять root logger или глобальную конфигурацию процесса.
 
+В M1 top-level exports ленивые: обычный `import structuraguard` не
+загружает Pydantic, а `SDKConfig` и facade подгружаются при явном
+обращении к символу. Сам core StructuraGuard не читает environment;
+инициализация сторонней dependency начинается только за этой явной
+границей.
+
 Любой I/O начинается только после явного вызова операции. Resources и policies
 передаются через constructors или параметры вызова.
 
@@ -163,8 +195,8 @@ output остаются недоверенными данными.
 
 `analyze`, `create_plan` и `dry_run` используют только применимые префиксы этого
 pipeline. Они MUST NOT обходить те же detection, policy и plan-validation
-границы. Точные side effects каждого публичного сценария определены в
-[публичном API](public-api.md).
+границы. Канонические пользовательские сценарии определены в
+[разделе 23 ТЗ][spec-public-api].
 
 ## Идентичность артефактов
 
@@ -408,8 +440,9 @@ outcome `rolled_back`.
 Resources закрываются в обратном порядке владения при success, failure,
 cancellation и timeout. SDK закрывает только созданные им streams, connections и
 transactions, а также temporary snapshots, ownership которых не передан live
-`SourceAnalysis`; caller-owned resource lifecycle задаётся
-[публичным API](public-api.md). Ошибка listener или cleanup не может превратить
+`SourceAnalysis`; caller-owned resource lifecycle остаётся за caller. Канонические
+требования к cancellation, timeout и cleanup задаёт [NFR-010 ТЗ][spec-nfr-010].
+Ошибка listener или cleanup не может превратить
 отклонённый plan в разрешённую загрузку и не скрывает неизвестный transaction
 outcome.
 
@@ -447,11 +480,15 @@ outcome.
 
 [ADR 0001]: adr/0001-public-api-and-run-policies.md
 [ADR 0002]: adr/0002-security-boundary-defaults.md
+[spec-nfr-010]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#nfr-010-отмена-и-timeout
+[spec-public-api]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#23-публичный-api-sdk
 
-## Вне архитектурного scope M0
+## Вне архитектурного scope M0/M1
 
-M0 не определяет точные DTO, package layout, SQL schema staging или выбор
-библиотек adapters. Численные resource limits канонически задаются в
+M0 не определял точные DTO, package layout, SQL schema staging или выбор
+библиотек adapters. M1 фиксирует только package layout, config/error contracts и
+facade scaffold; domain DTO, ports, pipeline и adapters остаются deferred.
+Численные resource limits канонически задаются в
 [требованиях](requirements.md) и не дублируются здесь. M0 не включает web
 deployment, worker, UI, OCR/media processing, administrative migrations и
 production support других СУБД. Полный out-of-scope и acceptance traceability
