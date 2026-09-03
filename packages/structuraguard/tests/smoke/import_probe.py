@@ -141,7 +141,7 @@ def _package_import_paths() -> frozenset[str]:
         raise ForbiddenSideEffect("structuraguard import location is unavailable")
     package_directory = Path(specification.origin).resolve().parent
     allowed: set[str] = set()
-    for source_path in package_directory.iterdir():
+    for source_path in package_directory.rglob("*"):
         if source_path.suffix.casefold() not in {
             ".py",
             ".pyc",
@@ -657,7 +657,33 @@ def _assert_guards_active(allowed_import_paths: frozenset[str]) -> None:
 
 
 def _prepare_attribution_dependencies() -> None:
+    for module_name in (
+        "dataclasses",
+        "decimal",
+        "enum",
+        "hashlib",
+        "json",
+        "math",
+        "re",
+    ):
+        importlib.import_module(module_name)
     pydantic = importlib.import_module("pydantic")
+    for public_name in (
+        "AfterValidator",
+        "BaseModel",
+        "BeforeValidator",
+        "ConfigDict",
+        "Field",
+        "StrictBool",
+        "StrictBytes",
+        "StrictFloat",
+        "StrictInt",
+        "StrictStr",
+        "StringConstraints",
+        "field_validator",
+        "model_validator",
+    ):
+        getattr(pydantic, public_name)
     type(
         "_AttributionProbeModel",
         (pydantic.BaseModel,),
@@ -698,6 +724,17 @@ def run_probe(mode: str) -> None:
         default_sync_sdk = module.StructuraGuard()
         if default_async_sdk.config is default_sync_sdk.config:
             raise ForbiddenSideEffect("facades share a default SDKConfig instance")
+        contracts_module = importlib.import_module("structuraguard.contracts")
+        domain_module = importlib.import_module("structuraguard.domain")
+        ports_module = importlib.import_module("structuraguard.ports")
+        for checked_module in (contracts_module, domain_module, ports_module):
+            exports = tuple(checked_module.__all__)
+            if len(exports) != len(set(exports)):
+                raise ForbiddenSideEffect(
+                    f"duplicate exports in {checked_module.__name__}"
+                )
+            for export_name in exports:
+                getattr(checked_module, export_name)
     elif "pydantic" in sys.modules:
         raise ForbiddenSideEffect("plain import eagerly loaded Pydantic")
     _assert_snapshots_unchanged(

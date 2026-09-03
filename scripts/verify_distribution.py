@@ -31,7 +31,7 @@ from pathlib import Path, PurePosixPath
 from typing import cast
 
 _DISTRIBUTION_NAME = "structuraguard"
-_VERSION = "0.1.0"
+_VERSION = "0.2.0"
 _WHEEL_NAME = f"{_DISTRIBUTION_NAME}-{_VERSION}-py3-none-any.whl"
 _SDIST_NAME = f"{_DISTRIBUTION_NAME}-{_VERSION}.tar.gz"
 _DIST_INFO = f"{_DISTRIBUTION_NAME}-{_VERSION}.dist-info"
@@ -41,7 +41,27 @@ _PACKAGE_FILES = frozenset(
     {
         "structuraguard/__init__.py",
         "structuraguard/config.py",
+        "structuraguard/contracts/__init__.py",
+        "structuraguard/contracts/_base.py",
+        "structuraguard/contracts/common.py",
+        "structuraguard/contracts/database.py",
+        "structuraguard/contracts/mapping.py",
+        "structuraguard/contracts/normalized.py",
+        "structuraguard/contracts/parsing.py",
+        "structuraguard/contracts/reports.py",
+        "structuraguard/contracts/source.py",
+        "structuraguard/domain/__init__.py",
+        "structuraguard/domain/canonical.py",
+        "structuraguard/domain/lineage.py",
         "structuraguard/exceptions.py",
+        "structuraguard/ports/__init__.py",
+        "structuraguard/ports/database.py",
+        "structuraguard/ports/llm.py",
+        "structuraguard/ports/parser.py",
+        "structuraguard/ports/security.py",
+        "structuraguard/ports/semantic.py",
+        "structuraguard/ports/source.py",
+        "structuraguard/ports/stores.py",
         "structuraguard/py.typed",
         "structuraguard/sdk.py",
         "structuraguard/sync_sdk.py",
@@ -61,6 +81,161 @@ _PUBLIC_EXPORTS = frozenset(
         "ValidationError",
         "SecurityPolicyError",
         "LoadError",
+    }
+)
+_CONTRACT_EXPORTS = frozenset(
+    {
+        "AuditEvent",
+        "BatchFingerprint",
+        "BooleanScalar",
+        "BoundingBox",
+        "BuiltInErrorCode",
+        "BuiltInIssueCode",
+        "BytesScalar",
+        "CatalogColumnRef",
+        "ColumnCatalog",
+        "CssSelectorLocation",
+        "DatabaseCatalog",
+        "DatabaseInspectionRequest",
+        "DataClassification",
+        "DateScalar",
+        "DateTimeScalar",
+        "DecimalScalar",
+        "DocumentBlockLocation",
+        "DocumentBlockGrouping",
+        "DocumentParsePlan",
+        "DocumentShapeObservation",
+        "DocumentTargetSelector",
+        "EveryLineStart",
+        "ErrorPolicy",
+        "ExtensionLocation",
+        "ExtensionMetadataEntry",
+        "ExtractedBatch",
+        "ExtractedBatchSummary",
+        "ExtractedBlock",
+        "ExtractedBlockKind",
+        "ExtractedCell",
+        "ExtractedDatasetManifest",
+        "ExtractedLine",
+        "ExtractedSourceIndex",
+        "ExtractedTable",
+        "ExtractedTreeNode",
+        "ExtractedValue",
+        "FieldMapping",
+        "ForeignKeyCatalog",
+        "GroupLinesRule",
+        "IntegerScalar",
+        "IssueSeverity",
+        "JsonPointerLocation",
+        "LLMRequest",
+        "LLMResponse",
+        "LineRangeLocation",
+        "LoadContext",
+        "LoadOperation",
+        "LoadPolicy",
+        "LoadReport",
+        "LogParsePlan",
+        "LogLineGrouping",
+        "LogShapeObservation",
+        "LogTokenSelector",
+        "LogRecordStart",
+        "MappingCandidate",
+        "MappingPlan",
+        "MappingPlanValidationRequest",
+        "MappingPlanValidationResult",
+        "MappingPolicyRef",
+        "NormalizedBatch",
+        "NormalizedBatchSummary",
+        "NormalizedDatasetManifest",
+        "NormalizedRecord",
+        "NormalizedScalar",
+        "NormalizedValue",
+        "NullScalar",
+        "NumberScalar",
+        "ParseExecutionContext",
+        "ParseEntity",
+        "ParseEntityGrouping",
+        "ParseField",
+        "ParseFieldSelector",
+        "ParsePlan",
+        "ParsePlanKind",
+        "ParsePlanValidationRequest",
+        "ParsePlanValidationResult",
+        "ParseRule",
+        "PhysicalObjectKind",
+        "PhysicalSample",
+        "PhysicalSourceRef",
+        "PipelineStatus",
+        "ProbeResult",
+        "ProducerMetadata",
+        "PrefixTokenStart",
+        "ProviderCapabilities",
+        "RawScalar",
+        "RecordRangeRule",
+        "SchemaCatalog",
+        "SecurityApproval",
+        "SecurityReport",
+        "SecurityScanRequest",
+        "SemanticEntity",
+        "SemanticField",
+        "SemanticFieldRef",
+        "SemanticParseReport",
+        "SemanticParsingMode",
+        "SemanticSourceIndex",
+        "SheetCellLocation",
+        "SourceArtifact",
+        "SourceArtifactRef",
+        "SourceLocation",
+        "StagingContext",
+        "StringScalar",
+        "StructureAnalysisRequest",
+        "StructureAnalysisResult",
+        "StructureCandidate",
+        "StructureEvidence",
+        "StructureNeedsReview",
+        "StructureObservation",
+        "StructurePlanCreated",
+        "StructureProfile",
+        "StructureRejected",
+        "TableCatalog",
+        "TabularCellLocation",
+        "TabularColumnSelector",
+        "TabularParsePlan",
+        "TabularRowGrouping",
+        "TabularShapeObservation",
+        "TransactionOutcome",
+        "TreeParsePlan",
+        "TreeNodeGrouping",
+        "TreePathSelector",
+        "TreeShapeObservation",
+        "ValidatedMappingPlan",
+        "ValidatedParsePlan",
+        "ValidationDecision",
+        "ValidationIssue",
+        "ValidationReport",
+        "XPathLocation",
+    }
+)
+_DOMAIN_EXPORTS = frozenset(
+    {
+        "batch_sequence_is_contiguous",
+        "canonical_json",
+        "references_belong_to_extraction",
+        "sha256_fingerprint",
+        "unresolved_physical_refs",
+    }
+)
+_PORT_EXPORTS = frozenset(
+    {
+        "AuditStore",
+        "DatabaseAdapter",
+        "LLMProvider",
+        "ParsePlanExecutor",
+        "ParsePlanValidator",
+        "Parser",
+        "SecurityScanner",
+        "SemanticStructureAnalyzer",
+        "StagingStore",
     }
 )
 _OPTIONAL_DEPENDENCIES = {
@@ -1037,6 +1212,9 @@ def _probe_source(
     repository_root: Path,
 ) -> str:
     exports_json = json.dumps(sorted(_PUBLIC_EXPORTS))
+    contract_exports_json = json.dumps(sorted(_CONTRACT_EXPORTS))
+    domain_exports_json = json.dumps(sorted(_DOMAIN_EXPORTS))
+    port_exports_json = json.dumps(sorted(_PORT_EXPORTS))
     forbidden_json = json.dumps(sorted(_FORBIDDEN_DEPENDENCIES))
     optional_json = json.dumps(sorted(_FORBIDDEN_OPTIONAL_IMPORTS))
     runtime_versions_json = json.dumps(expected_runtime_versions, sort_keys=True)
@@ -1049,6 +1227,9 @@ def _probe_source(
         import sys
 
         expected_exports = set(json.loads({exports_json!r}))
+        expected_contract_exports = set(json.loads({contract_exports_json!r}))
+        expected_domain_exports = set(json.loads({domain_exports_json!r}))
+        expected_port_exports = set(json.loads({port_exports_json!r}))
         forbidden_roots = set(json.loads({forbidden_json!r}))
         optional_roots = set(json.loads({optional_json!r}))
         expected_runtime_versions = json.loads({runtime_versions_json!r})
@@ -1081,6 +1262,24 @@ def _probe_source(
         missing = sorted(name for name in expected_exports if not hasattr(structuraguard, name))
         if missing:
             raise SystemExit(f"missing top-level exports: {{missing}}")
+
+        import structuraguard.contracts as contracts
+        import structuraguard.domain as domain
+        import structuraguard.ports as ports
+
+        for module, expected in (
+            (contracts, expected_contract_exports),
+            (domain, expected_domain_exports),
+            (ports, expected_port_exports),
+        ):
+            module_exports = tuple(module.__all__)
+            if len(module_exports) != len(set(module_exports)) or set(module_exports) != expected:
+                raise SystemExit(
+                    f"unexpected {{module.__name__}}.__all__: {{module_exports}}"
+                )
+            missing = sorted(name for name in expected if not hasattr(module, name))
+            if missing:
+                raise SystemExit(f"missing {{module.__name__}} exports: {{missing}}")
         module_path = pathlib.Path(structuraguard.__file__).resolve()
         environment_root = pathlib.Path(sys.prefix).resolve()
         repository_root = pathlib.Path({os.fspath(repository_root)!r}).resolve()

@@ -1,6 +1,6 @@
 # Требования StructuraGuard SDK
 
-Статус: нормативный baseline milestone M0 с уточнением поставки M1. Документ
+Статус: нормативный baseline milestone M0 с уточнениями поставок M1–M2. Документ
 задаёт целевое поведение; наличие конкретной возможности подтверждает только
 evidence, полученное в указанном milestone.
 
@@ -214,11 +214,13 @@ failures `MUST NOT` понижаться до record-level warning. Partial succ
 `PIPE-001` Нормативный порядок обработки:
 
 ```text
-source → limits/detection → parser → normalized source/profile
-       → PII scan → DB inspection/catalog/fingerprint
+source → limits/detection → technical parser → ExtractedBatch
+       → structure profile/analyzer → ParsePlan validation
+       → ParsePlan execution → NormalizedBatch → PII scan
+       → DB inspection/catalog/fingerprint
        → deterministic candidates → optional LLM mapping
-       → MappingPlan → independent plan validation
-       → normalization/record validation → staging/recheck
+       → MappingPlan → independent MappingPlan validation
+       → record validation → staging/recheck
        → transactional load or rollback → reports/audit
 ```
 
@@ -230,11 +232,17 @@ convenience API `MUST NOT` допускаться.
 ```text
 CREATED
 SOURCE_PROBING
-SOURCE_PARSING
-SOURCE_PROFILING
+TECHNICAL_PARSING
+STRUCTURE_PROFILING
+STRUCTURE_ANALYZING
+PARSE_PLAN_CREATED
+PARSE_PLAN_VALIDATING
+SEMANTIC_PARSING
+NORMALIZED_DATA_PROFILING
 DATABASE_INSPECTING
 MAPPING
-PLAN_VALIDATING
+MAPPING_PLAN_CREATED
+MAPPING_PLAN_VALIDATING
 NORMALIZING
 VALIDATING
 STAGING
@@ -255,6 +263,21 @@ CANCELLED
 
 ## Mapping, LLM и результаты
 
+`PARSE-001` Technical parser `MUST` возвращать только physical
+`ExtractedBatch`: raw values, blocks/tables/trees и проверяемые source
+locations. Он `MUST NOT` назначать окончательные semantic names, entities или
+DB targets.
+
+`PARSE-002` Semantic analyzer `MUST` формировать закрытый декларативный вариант
+`ParsePlan`. Plan без независимой проверки lineage и operators `MUST NOT`
+передаваться executor. Только применение `ValidatedParsePlan` создаёт
+`NormalizedBatch`.
+
+`PARSE-003` `ParsePlan` и `MappingPlan` являются разными contracts. Первый
+связывает physical references с semantic fields; второй связывает только
+semantic fields с catalog identifiers. Python, callbacks, shell и SQL в plans
+запрещены.
+
 `MAP-001` Candidate generation `MUST` быть детерминированным до обращения к
 LLM. `MappingPlan` `MUST` содержать только декларативные ссылки на разрешённые
 catalog objects и преобразования; произвольный исполняемый SQL запрещён.
@@ -268,12 +291,11 @@ policy до execution.
 optional adapter; provider contract `MUST` позволять как минимум две
 взаимозаменяемые конфигурации без изменения domain/pipeline.
 
-`LLM-002` LLM `MAY` только ранжировать или выбирать из переданных mapping
-candidates и возвращать schema-bound mapping proposal, ссылающийся на них. Она
-не является источником истины, не получает tools, DB connection, credentials
-или произвольный catalog access и не создаёт исполняемый SQL. Любой output LLM
-считается недоверенным и `MUST` пройти deterministic schema и `MappingPlan`
-validation.
+`LLM-002` LLM `MAY` предлагать schema-bound `ParsePlan` либо ранжировать
+переданные mapping candidates. Она не является источником истины, не получает
+tools, source/DB handles, credentials или произвольный catalog access и не
+создаёт исполняемый SQL. Любой output LLM считается недоверенным и `MUST` пройти
+соответствующую deterministic plan validation.
 
 `VAL-001` Validation `MUST` покрывать syntax, types, JSON Schema, DB
 constraints, business rules и provenance. Результат `MUST` включать
@@ -285,8 +307,9 @@ parser, mapping algorithm, prompt, provider/model, generation parameters,
 normalizers и rules, а также source/DB/plan/target-policy fingerprints.
 
 `DATA-002` Все встроенные parsers `MUST` преобразовывать данные в единую
-типизированную normalized source model с records, fields, metadata, issues и
-provenance. Формат источника `MUST NOT` менять contract downstream stages.
+physical Extracted Source Model. Единая Normalized Data Model появляется только
+после применения проверенного `ParsePlan`. Формат источника `MUST NOT` менять
+contract semantic/downstream stages.
 
 `REPORT-001` Run `MUST` возвращать типизированные processing, validation и
 security outcomes, включая machine-readable `ValidationReport` и
@@ -405,8 +428,11 @@ listener. Для `NFR-009` минимальный event vocabulary:
 
 ```text
 source.detected
-source.parsed
-source.profiled
+source.technical_parsed
+structure.profiled
+parse_plan.created
+parse_plan.validated
+semantic.parsed
 database.inspected
 mapping.candidates_created
 mapping.created
@@ -451,6 +477,20 @@ StructuraGuard не читает environment.
 placeholder. Sync-операция, вызванная внутри активного event loop, `MUST` сначала
 завершаться `error_code="SYNC_API_IN_ASYNC_CONTEXT"`.
 
+`M2-001` `structuraguard.contracts` `MUST` экспортировать frozen DTO с
+`extra="forbid"`, tuple collections, tagged scalars и deterministic
+serialization. Naive datetime, non-finite numbers и неверные lineage states
+отклоняются при создании.
+
+`M2-002` `structuraguard.ports` `MUST` экспортировать protocols `Parser`,
+`SemanticStructureAnalyzer`, `ParsePlanValidator`, `ParsePlanExecutor`,
+`DatabaseAdapter`, `LLMProvider`, `SecurityScanner`, `StagingStore` и
+`AuditStore`. Protocols не содержат concrete infrastructure types.
+
+`M2-003` Корневой `structuraguard.__all__` `MUST` сохранить exports M1. Новая
+поверхность M2 доступна только через выделенные subpackages и включается в
+wheel/sdist вместе с `py.typed`.
+
 `QA-001` До финальной приёмки `MUST` существовать unit, contract, integration и
 security test suites. Security suite `MUST` включать негативные сценарии parser,
 LLM, credentials, SQL/identifier injection, DDL, privileges и rollback.
@@ -477,14 +517,14 @@ configuration и измеряемых mapping, load, LLM, performance и securit
 | AC-04 | SRC-001, SRC-002, SRC-003 | source contract/lease/path matrix | M3 |
 | AC-05 | FMT-001, SEC-002 | detection/parser matrix | M4 |
 | AC-06 | FMT-002, NFR-004 | registry contract tests | M3 |
-| AC-07 | DATA-002 | normalized-model contracts | M2/M4 |
+| AC-07 | PARSE-001–PARSE-003, DATA-002 | extracted/parse/normalized contracts | M2/M4 |
 | AC-08 | NFR-006, NFR-011 | streaming benchmark | M4/M14 |
 | AC-09 | DB-001, DB-002 | PostgreSQL integration test | M5 |
 | AC-10 | DB-002 | catalog constraint fixtures | M5 |
 | AC-11 | DB-002 | FK graph fixture | M5 |
 | AC-12 | DB-002, DB-005, NFR-007 | fingerprint repeatability test | M5 |
 | AC-13 | MAP-001 | mapping golden set | M7 |
-| AC-14 | MAP-001 | `MappingPlan` contract test | M7 |
+| AC-14 | MAP-001 | `MappingPlan` contract test | M2/M7 |
 | AC-15 | LLM-001 | no-LLM integration test | M7 |
 | AC-16 | LLM-001 | provider contract tests ×2 | M8 |
 | AC-17 | MAP-001, LLM-002 | LLM SQL security test | M8/M12 |
