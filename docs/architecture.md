@@ -1,8 +1,8 @@
 # Архитектура StructuraGuard
 
-Статус: нормативный baseline milestone M0; package layout и доступный scaffold
-уточнены в M1. Целевые компоненты не считаются реализованными без milestone
-evidence.
+Статус: нормативный baseline milestone M0; package layout/scaffold уточнены в
+M1, а двухэтапные DTO и ports — в M2. Целевые adapters не считаются
+реализованными без milestone evidence.
 
 Термины `MUST`, `SHOULD` и `MAY` означают соответственно обязательное требование,
 рекомендацию с документируемым отклонением и допустимый вариант.
@@ -45,7 +45,7 @@ domain + contracts + ports
 parser / database / LLM / validation / security / store adapters
 ```
 
-### Package layout M1
+### Package layout M2
 
 Корень репозитория является виртуальным `uv` workspace и не создаёт второй
 distribution. Устанавливаемый package имеет единственный source of truth:
@@ -56,7 +56,10 @@ packages/structuraguard/
 ├── src/structuraguard/
 │   ├── __init__.py
 │   ├── config.py
+│   ├── contracts/
+│   ├── domain/
 │   ├── exceptions.py
+│   ├── ports/
 │   ├── sdk.py
 │   ├── sync_sdk.py
 │   └── py.typed
@@ -77,8 +80,10 @@ dependencies. Новые domain, ports и adapters добавляются вну
   бизнес-логики.
 - **Application pipeline** координирует стадии, state transitions, timeout,
   cancellation, cleanup и транзакционную границу.
-- **Domain и contracts** содержат модели источника, каталога БД, candidates,
-  `MappingPlan`, validation evidence, reports и policy decisions.
+- **Contracts** содержат immutable physical/normalized DTO, `ParsePlan`, каталог
+  БД, `MappingPlan`, validation evidence, reports и policy decisions.
+- **Domain** содержит только canonical serialization, fingerprinting и чистые
+  проверки lineage.
 - **Ports** описывают требуемые возможности без привязки к provider или
   infrastructure.
 - **Adapters** реализуют parser, DB inspection/load, LLM, staging, audit и другие
@@ -171,26 +176,32 @@ output остаются недоверенными данными.
 Любой I/O начинается только после явного вызова операции. Resources и policies
 передаются через constructors или параметры вызова.
 
-## Pipeline
+## Целевой pipeline
 
-Полный ingest run проходит следующие логические фазы:
+После реализации соответствующих milestones полный ingest run должен проходить
+следующие логические фазы. В M2 подтверждены только DTO и port boundaries этой
+схемы; orchestration и concrete adapters ещё отсутствуют. Нормативный scope
+contracts задан [разделом M2 технического задания][spec-m2].
 
 1. Создание контекста run, безопасное чтение источника, проверка лимитов и
    вычисление source fingerprint.
-2. Определение формата по содержимому, выбор parser, parsing и построение
-   normalized source model с provenance.
-3. Профилирование источника, поиск PII/secrets и применение security policy.
-4. Read-only inspection целевой БД, построение catalog, FK graph и database
+2. Определение формата и technical parsing в `ExtractedBatch` без назначения
+   бизнес-смысла.
+3. Structural profiling, semantic analysis, создание и независимая проверка
+   декларативного `ParsePlan`.
+4. Детерминированное применение `ValidatedParsePlan` и построение
+   `NormalizedBatch` с provenance; security checks применяются на границах.
+5. Read-only inspection целевой БД, построение catalog, FK graph и database
    fingerprint.
-5. Deterministic candidate generation и ranking; optional LLM mapping применяется
+6. Deterministic candidate generation и ranking; optional LLM mapping применяется
    только по разрешающей policy.
-6. Создание декларативного `MappingPlan` и его независимая проверка.
-7. Нормализация, structural/type/business validation и разрешение FK.
-8. Staging, повторная проверка fingerprints, target identity, audit capability
+7. Создание декларативного `MappingPlan` и его независимая проверка.
+8. Structural/type/business validation и разрешение FK.
+9. Staging, повторная проверка fingerprints, target identity, audit capability
    и pre-commit invariants.
-9. Транзакционная запись в основные таблицы и durable core audit/outbox record
+10. Транзакционная запись в основные таблицы и durable core audit/outbox record
    через DB adapter, затем commit либо rollback.
-10. Формирование result/reports, post-commit delivery внешним listeners и cleanup
+11. Формирование result/reports, post-commit delivery внешним listeners и cleanup
     принадлежащих SDK ресурсов.
 
 `analyze`, `create_plan` и `dry_run` используют только применимые префиксы этого
@@ -204,7 +215,9 @@ pipeline. Они MUST NOT обходить те же detection, policy и plan-v
 
 При первом чтении создаётся SHA-256 fingerprint точного содержимого источника.
 Для программных объектов используется стабильное каноническое представление с
-версией алгоритма. Точный encoding contract определяется вместе с DTO в M2.
+версией алгоритма. Persisted wire-форма едина: `sha256:<64 lowercase hex>`.
+Bare digest на входной boundary нормализуется до неё до equality и duplicate
+checks.
 
 Path задаётся как `str` или `PathLike`, а raw text — явным `TextSource`, поэтому
 SDK не определяет намерение caller по эвристике. Path transport доступен только
@@ -273,11 +286,17 @@ scope. Mutable run data не разделяется между параллел�
 ```text
 CREATED
   -> SOURCE_PROBING
-  -> SOURCE_PARSING
-  -> SOURCE_PROFILING
+  -> TECHNICAL_PARSING
+  -> STRUCTURE_PROFILING
+  -> STRUCTURE_ANALYZING
+  -> PARSE_PLAN_CREATED
+  -> PARSE_PLAN_VALIDATING
+  -> SEMANTIC_PARSING
+  -> NORMALIZED_DATA_PROFILING
   -> DATABASE_INSPECTING
   -> MAPPING
-  -> PLAN_VALIDATING
+  -> MAPPING_PLAN_CREATED
+  -> MAPPING_PLAN_VALIDATING
   -> NORMALIZING
   -> VALIDATING
   -> STAGING
@@ -477,17 +496,24 @@ outcome.
   strict mode; численные limits принадлежат
   [требованиям](requirements.md) и [модели угроз](threat-model.md). См.
   [ADR 0002].
+- `D-13`: technical parser возвращает только physical `ExtractedBatch`;
+  `NormalizedBatch` создаётся после independent validation и применения
+  `ParsePlan`. `MappingPlan` использует только semantic/catalog references. См.
+  [ADR 0003].
 
 [ADR 0001]: adr/0001-public-api-and-run-policies.md
 [ADR 0002]: adr/0002-security-boundary-defaults.md
+[ADR 0003]: adr/0003-two-stage-parsing-contracts.md
+[spec-m2]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m2-доменные-модели-и-contracts
 [spec-nfr-010]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#nfr-010-отмена-и-timeout
 [spec-public-api]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#23-публичный-api-sdk
 
-## Вне архитектурного scope M0/M1
+## Вне архитектурного scope M0–M2
 
 M0 не определял точные DTO, package layout, SQL schema staging или выбор
-библиотек adapters. M1 фиксирует только package layout, config/error contracts и
-facade scaffold; domain DTO, ports, pipeline и adapters остаются deferred.
+библиотек adapters. M1 зафиксировал package scaffold. M2 фиксирует DTO,
+fingerprint/serialization rules и adapter protocols, но не реализует pipeline,
+format parsers, analyzers/executors, DB reflection/load или LLM providers.
 Численные resource limits канонически задаются в
 [требованиях](requirements.md) и не дублируются здесь. M0 не включает web
 deployment, worker, UI, OCR/media processing, administrative migrations и

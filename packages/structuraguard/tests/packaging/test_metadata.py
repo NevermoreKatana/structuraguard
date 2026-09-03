@@ -60,7 +60,7 @@ def test_package_metadata_declares_one_typed_python_312_distribution() -> None:
     project = _as_mapping(document.get("project"), "project")
 
     assert project["name"] == "structuraguard"
-    assert project["version"] == "0.1.0"
+    assert project["version"] == "0.2.0"
     assert project["requires-python"] == ">=3.12"
     assert build_system["build-backend"] == "hatchling.build"
     assert SOURCE_PACKAGE.is_dir()
@@ -99,5 +99,5 @@ def test_optional_extras_are_exact_and_all_is_the_deduplicated_union() -> None:
 def test_installed_distribution_metadata_matches_the_project() -> None:
     distribution = metadata.distribution("structuraguard")
 
-    assert distribution.version == "0.1.0"
+    assert distribution.version == "0.2.0"
     assert distribution.metadata["Requires-Python"] == ">=3.12"

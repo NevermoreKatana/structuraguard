@@ -48,6 +48,8 @@ nav:
   - ADR:
       - Public API и run policies: adr/0001-public-api-and-run-policies.md
       - Security boundary defaults: adr/0002-security-boundary-defaults.md
+      - Двухэтапная модель parsing: adr/0003-two-stage-parsing-contracts.md
   - Планы:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
+      - M02 — domain contracts: plans/M02_domain_contracts.md

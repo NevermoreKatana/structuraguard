@@ -9,16 +9,18 @@ StructuraGuard — встраиваемый Python SDK для безопасно
 ## Главный pipeline
 
 ```text
-Source → detection → parser → normalized model → source profiling
-       → database inspection → candidate mapping → optional LLM mapping
-       → MappingPlan validation → normalization → record validation
+Source → detection → technical parser → ExtractedBatch
+       → structure profiling/analyzer → ParsePlan validation/execution
+       → NormalizedBatch → database inspection → candidate mapping
+       → optional LLM mapping → MappingPlan validation → record validation
        → staging → transactional load → report + audit
 ```
 
 ## Собственная инженерная часть
 
 - Parser protocol и registry.
-- Unified normalized source model с provenance.
+- Physical Extracted Source Model и semantic Normalized Model с provenance.
+- Закрытый декларативный `ParsePlan`, отделённый от DB mapping.
 - Database catalog, schema fingerprint и FK graph.
 - Deterministic mapper и LLM-assisted semantic mapper.
 - Строгий декларативный `MappingPlan` без SQL.

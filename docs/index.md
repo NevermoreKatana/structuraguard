@@ -4,29 +4,40 @@ StructuraGuard — встраиваемая Python-библиотека для �
 разнородных данных в существующие реляционные БД. Основной API асинхронный, а
 sync API предоставляется отдельной facade.
 
-## Доступность в M1
+## Доступность в M2
 
-Milestone M1 создаёт устанавливаемый typed package и инфраструктуру качества.
-Публично доступны:
+Milestone M2 сохраняет scaffold M1 и добавляет типизированную contract boundary
+двухэтапного parsing. Публично доступны:
 
 - immutable `SDKConfig`, который принимает только явные значения и не
   использует environment как источник config;
 - `AsyncStructuraGuard` и отдельный `StructuraGuard`;
 - typed hierarchy `StructuraGuardError`, включая
   `OperationNotImplementedError`;
-- machine-readable поле `error_code`.
+- machine-readable поле `error_code`;
+- frozen DTO физической модели `Extracted*`, декларативного `ParsePlan`,
+  семантической модели `Normalized*`, `DatabaseCatalog`, `MappingPlan` и reports;
+- девять adapter protocols в `structuraguard.ports`, включая `Parser`,
+  `SemanticStructureAnalyzer`, `ParsePlanExecutor`, `DatabaseAdapter` и
+  provider-neutral `LLMProvider`.
 
 Обычный `import structuraguard` не загружает Pydantic: lazy top-level exports
 подгружают `SDKConfig` и facade только при явном обращении к этим
 символам. Код StructuraGuard не читает environment.
 
-Pipeline, parsers, DB adapters и LLM adapters в M1 не реализованы. Вызов
+Concrete parsers, semantic services, DB/LLM adapters и orchestrator в M2 не
+реализованы. Вызов
 операции facade завершается контролируемой ошибкой
 `SDK_OPERATION_NOT_IMPLEMENTED`; это не успешный placeholder. Sync-вызов внутри
 активного event loop завершается `SYNC_API_IN_ASYNC_CONTEXT`.
 
-Исполнимый пример создания async facade и обработки этого typed failure приведён
-в разделе [«Копируемый пример M1»](public-api.md#m1-copyable-example).
+Contracts доступны только через `structuraguard.contracts` и
+`structuraguard.ports`; корневые exports M1 не расширены. Подробнее см.
+[публичный API](public-api.md).
+
+Минимальное создание и JSON round-trip физического DTO показаны в
+[contract-only примере](public-api.md#m2-contract-copyable-example). Пример не
+запускает parser или ingest.
 
 ## Навигация
 

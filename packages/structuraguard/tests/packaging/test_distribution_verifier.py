@@ -59,7 +59,7 @@ def test_sdist_member_limit_is_applied_during_streaming_read(tmp_path: Path) -> 
     archive_path = tmp_path / "too-many-members.tar.gz"
     with tarfile.open(archive_path, mode="w:gz") as archive:
         for index in range(513):
-            member = tarfile.TarInfo(f"structuraguard-0.1.0/file-{index}.txt")
+            member = tarfile.TarInfo(f"structuraguard-0.2.0/file-{index}.txt")
             member.size = 0
             archive.addfile(member, io.BytesIO())
 
@@ -89,7 +89,7 @@ def test_sdist_decompressed_stream_limit_covers_regular_member_payload(
     archive_path = tmp_path / "stream-limit.tar.gz"
     payload = b"x" * 8_192
     with tarfile.open(archive_path, mode="w:gz") as archive:
-        member = tarfile.TarInfo("structuraguard-0.1.0/file.txt")
+        member = tarfile.TarInfo("structuraguard-0.2.0/file.txt")
         member.size = len(payload)
         archive.addfile(member, io.BytesIO(payload))
 
@@ -103,8 +103,8 @@ def test_sdist_decompressed_stream_limit_covers_regular_member_payload(
 
 
 def test_dist_directory_rejects_gitignore(tmp_path: Path) -> None:
-    (tmp_path / "structuraguard-0.1.0-py3-none-any.whl").touch()
-    (tmp_path / "structuraguard-0.1.0.tar.gz").touch()
+    (tmp_path / "structuraguard-0.2.0-py3-none-any.whl").touch()
+    (tmp_path / "structuraguard-0.2.0.tar.gz").touch()
     (tmp_path / ".gitignore").touch()
 
     with pytest.raises(VerificationError, match="неожиданные файлы"):
@@ -160,7 +160,7 @@ def test_wheel_smoke_does_not_resolve_runtime_by_name_offline(
     monkeypatch.setitem(verifier_globals, "_venv_python", fake_venv_python)
     monkeypatch.setitem(verifier_globals, "_run_checked", fake_run_checked)
 
-    wheel = tmp_path / "structuraguard-0.1.0-py3-none-any.whl"
+    wheel = tmp_path / "structuraguard-0.2.0-py3-none-any.whl"
     wheel.touch()
     verify_installed_wheel(
         uv=Path("/tool/uv"),

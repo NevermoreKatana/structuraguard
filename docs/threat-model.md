@@ -3,7 +3,7 @@
 ## Статус документа
 
 Этот документ задаёт нормативную модель угроз для design baseline M0 и отмечает
-ограниченный runtime subset, подтверждённый в M1. Каждый control имеет два
+ограниченный runtime subset, подтверждённый в M1–M2. Каждый control имеет два
 независимых статуса:
 
 - нормативный статус `REQUIRED`: control обязателен для приёмки затронутой
@@ -11,13 +11,24 @@
 - статус реализации `IMPLEMENTED` с milestone evidence либо `PLANNED`, если
   реализация должна появиться в указанном будущем milestone.
 
-В M1 статус `IMPLEMENTED` имеют только два ограниченных controls:
+В M1 статус `IMPLEMENTED` получили import/error controls. В M2 дополнительно
+реализованы contract-level controls:
 
 - import и constructors package code не читают environment/files, не обращаются
   к сети и не меняют process-wide event-loop, thread, signal или logging state;
 - публичный `StructuraGuardError` ограничивает и санитизирует известные формы
   credentials, сохраняет только имя класса `cause` и делает `details`
   рекурсивно неизменяемыми.
+- physical и semantic models разделены; source references проверяются через
+  fingerprint-bound manifests/indexes;
+- `ParsePlan` и `MappingPlan` используют закрытые декларативные схемы без
+  Python, callbacks, shell и SQL, а executor ports принимают checked wrappers;
+- LLM request contract не содержит tools, credentials, source/DB handles и
+  ограничивает payload canonical JSON, размером и routing evidence; payload
+  связан собственным fingerprint, nested tools/credentials/handles/SQL keys и
+  известные credential/DSN/private-key canaries отклоняются до provider adapter;
+- `contracts`, `domain` и `ports` не импортируют infrastructure и не выполняют
+  I/O при импорте.
 
 Redaction ошибки является defense-in-depth и не распознаёт произвольный secret
 под нейтральным именем. Caller обязан передавать только safe `message`, `details`
@@ -196,7 +207,8 @@ root; per-run расширение source/target policy; подмена target �
 самосогласованный незарегистрированный target; executable content в aliases,
 rules или mapping templates; reuse plan с другим source или закрытым snapshot.
 
-**Controls:** `REQUIRED`; implementation `PLANNED` (`M2`, `M9`, `M12`).
+**Controls:** `REQUIRED`; typed contract boundary `IMPLEMENTED` (`M2`), runtime
+registry/policy enforcement `PLANNED` (`M9`, `M12`).
 
 - Source type, target, policy и extension inputs проходят typed validation.
   Неизвестные поля, modes и policy values отклоняются deny-by-default.
@@ -447,7 +459,7 @@ audit не входят.
 effects внутри разрешённой операции; adapter contract tests и DBA review должны
 учитывать их отдельно. Overprivileged writer увеличивает impact ошибки.
 
-### `TB-07`. Mapper → LLM provider
+### `TB-07`. Semantic analyzer/mapper → LLM provider
 
 **Активы:** `A-02`–`A-04`, `A-06`, `A-07`.
 
@@ -455,7 +467,8 @@ effects внутри разрешённой операции; adapter contract t
 automatic provider fallback; cost/token exhaustion; model возвращает SQL,
 неизвестный target или tool request; provider сохраняет разрешённый context.
 
-**Controls:** `REQUIRED`; implementation `PLANNED` (`M8`, `M9`, `M12`).
+**Controls:** `REQUIRED`; contract boundary `IMPLEMENTED` (`M2`), provider,
+routing и runtime enforcement `PLANNED` (`M6`, `M8`, `M9`, `M12`).
 
 - Deterministic mapping выполняется первым. LLM disabled без explicit provider
   и provider/data policy; отсутствие provider не является причиной неявного
@@ -464,11 +477,22 @@ automatic provider fallback; cost/token exhaustion; model возвращает S
   data. Инструкция внутри data не получает authority.
 - Classification, minimization и masking происходят до call и перед каждым
   fallback. Raw `RESTRICTED` content, credentials и reversible map не уходят.
+- `LLMRequest` принимает typed `SecurityApproval` с полным разрешающим
+  `SecurityReport`; canonical report, payload, classification, routing и
+  redaction fingerprints проверяются как единая lineage до provider call.
+- Structured payload keys нормализуются по punctuation/acronym/camelCase перед
+  denylist; известные bare API-token/credential/DSN canaries и Unicode
+  log-forging controls отклоняются на contract boundary. Persisted issues не
+  содержат free-form messages, audit IDs используют точные формы
+  `event-<UUID|ULID>`/`run-<UUID|ULID>`, а terminal audit
+  связывает конкретный allowed/blocked security report и не допускает evidence
+  из будущего.
+  Content-aware DLP остаётся runtime control.
 - LLM не получает tools, DB connection, DSN, secrets или прямой filesystem
   access. Модель не создаёт executable SQL.
-- Модель ранжирует или выбирает только из переданных candidates. Output ограничен
-  strict schema, ссылается только на этот candidate set, считается недоверенным
-  и проходит независимую deterministic `MappingPlan` validation.
+- Модель MAY предложить strict-schema `ParsePlan` из bounded physical context
+  либо ранжировать переданные DB candidates. Оба output недоверенны и проходят
+  соответствующую independent deterministic validation.
 - Tokens, calls и processing time ограничены `SecurityLimits`. Provider/model и
   policy capabilities проверяются до egress.
 
@@ -568,18 +592,24 @@ exporter. Безопасность такого downstream использова�
 
 1. `CREATED` → `SOURCE_PROBING`: validate input/policy, включая immutable
    path policy, и установить limits.
-2. `SOURCE_PROBING`/`SOURCE_PARSING`: проверить format, parser trust, sandbox и
+2. `SOURCE_PROBING`/`TECHNICAL_PARSING`: проверить format, parser trust, sandbox и
    container-specific controls.
-3. `SOURCE_PROFILING`: классифицировать PII/secrets до любого provider egress.
-4. `DATABASE_INSPECTING`: использовать только `schema_inspector`, построить
+3. `STRUCTURE_PROFILING`/`STRUCTURE_ANALYZING`: классифицировать и минимизировать
+   source samples до любого provider egress.
+4. `PARSE_PLAN_VALIDATING`: проверить closed operators, physical references и
+   fingerprint lineage до semantic parsing.
+5. `SEMANTIC_PARSING`/`NORMALIZED_DATA_PROFILING`: применять только checked plan
+   и повторно проверить limits/provenance.
+6. `DATABASE_INSPECTING`: использовать только `schema_inspector`, построить
    database fingerprint/target identity и применить allow/denylist.
-5. `MAPPING`/`PLAN_VALIDATING`: ограничить LLM candidates, проверить output,
+7. `MAPPING`/`MAPPING_PLAN_VALIDATING`: ограничить LLM candidates, проверить output,
    allowlist, DDL deny и plan fingerprint.
-6. `NORMALIZING`/`VALIDATING`: повторно проверить limits и не выполнять values.
-7. До `STAGING` и `LOADING`: на writer session повторно сверить source,
+8. `NORMALIZING`/`VALIDATING`: не выполнять values и не понижать plan errors до
+   record warnings.
+9. До `STAGING` и `LOADING`: на writer session повторно сверить source,
    database и target identity, plan evidence, allow/denylist и transactional
    audit/outbox availability.
-8. Перед terminal outcome: выполнить atomic commit либо подтверждённый rollback,
+10. Перед terminal outcome: выполнить atomic commit либо подтверждённый rollback,
    cleanup, durable core audit и post-commit delivery согласно outcome.
 
 Неоднозначный, но допускающий ручное решение случай завершается
@@ -615,13 +645,12 @@ error содержит стабильный `error_code`, безопасный `
 - Запрошена DDL operation: `REJECTED_SECURITY`, `DDL_FORBIDDEN`.
 - Target отсутствует в allowlist: `REJECTED_SECURITY`, `TARGET_NOT_ALLOWED`.
 - Suspicious prompt/content: `NEEDS_REVIEW` либо `REJECTED_SECURITY` согласно
-  risk policy; дополнительный code обязателен в M2.
+  risk policy, `PROMPT_INJECTION_DETECTED`.
 - Превышен security limit: `REJECTED_SECURITY` без partial load;
-  дополнительный code обязателен в M2.
-- Запрещён PII/provider egress: `REJECTED_SECURITY`; дополнительный code
-  обязателен в M2.
-- Невалидный LLM/plugin output: без staging/load; дополнительный code обязателен
-  в M2.
+  `SECURITY_LIMIT_EXCEEDED`.
+- Запрещён PII/provider egress: `REJECTED_SECURITY`,
+  `LLM_DATA_ROUTING_FORBIDDEN`.
+- Невалидный LLM/plugin output: без staging/load, `LLM_OUTPUT_INVALID`.
 
 Новые codes должны быть machine-readable, не переиспользовать старый смысл и
 не включать sensitive values. До определения кода feature не считается готовой;
@@ -629,8 +658,9 @@ error содержит стабильный `error_code`, безопасный `
 
 ## План security regression evidence
 
-Все сценарии ниже имеют статус `REQUIRED / PLANNED`. Они становятся executable
-tests в целевом milestone; M0 фиксирует только ожидаемый результат.
+Сценарии adapter/runtime ниже остаются `REQUIRED / PLANNED`. Contract-level
+invalid-state, SQL/code-field, import-boundary и canonical payload tests имеют
+evidence M2.
 
 - `SR-01` (`M3`, `M4`): extension/MIME/signature conflict создаёт event и не
   обходится молча.
