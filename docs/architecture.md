@@ -1,8 +1,9 @@
 # Архитектура StructuraGuard
 
 Статус: нормативный baseline milestone M0; package layout/scaffold уточнены в
-M1, а двухэтапные DTO и ports — в M2. Целевые adapters не считаются
-реализованными без milestone evidence.
+M1, двухэтапные DTO и ports — в M2, а registry technical parsers — в M3.
+Целевые format adapters и orchestrator не считаются реализованными без
+milestone evidence.
 
 Термины `MUST`, `SHOULD` и `MAY` означают соответственно обязательное требование,
 рекомендацию с документируемым отклонением и допустимый вариант.
@@ -45,7 +46,7 @@ domain + contracts + ports
 parser / database / LLM / validation / security / store adapters
 ```
 
-### Package layout M2
+### Package layout M3
 
 Корень репозитория является виртуальным `uv` workspace и не создаёт второй
 distribution. Устанавливаемый package имеет единственный source of truth:
@@ -59,6 +60,7 @@ packages/structuraguard/
 │   ├── contracts/
 │   ├── domain/
 │   ├── exceptions.py
+│   ├── parsers/
 │   ├── ports/
 │   ├── sdk.py
 │   ├── sync_sdk.py
@@ -156,6 +158,35 @@ untrusted executable extensions sandbox protocol в MVP отсутствует, 
 отклоняются. Declarative aliases, rules, templates, manifests и любой adapter
 output остаются недоверенными данными.
 
+В M3 это правило реализует `ParserRegistry`, который передаётся facade через
+constructor dependency injection и доступен как `sdk.parsers`. Значение по
+умолчанию создаётся отдельно для каждого facade; module-level mutable registry
+отсутствует. Manual parser IDs образуют единое canonical namespace с
+обнаруженными descriptors, а duplicate claim отклоняется без замены уже
+зарегистрированного значения.
+
+Selection выполняется только внутри async `registry.session()`, использует
+frozen snapshot и последовательно вызывает trusted parsers в canonical ID
+order. Сильные content signals (`internal_structure`, `signature` и
+content-derived MIME) определяют совместимость формата. Затем применяются
+`confidence`, `priority` и лексикографический `adapter_id`. Declared MIME и
+extension не могут выбрать parser без подтверждения содержимым; их расхождение с
+content evidence сохраняется как typed warning. Равносильное подтверждение
+разных `format_id` завершается `PARSER_FORMAT_CONFLICT`, а не скрывается
+tie-breaker.
+
+Discovery entry points группы `structuraguard.parsers` запускается только явным
+вызовом с allowlist policy. Оно создаёт bounded декларативные
+`ParserPluginDescriptor`, но не вызывает `EntryPoint.load()`, не импортирует
+module и не конструирует plugin. До появления `SandboxParserRunner` попытка
+активации такого descriptor через `activate_plugin()` завершается
+`SECURITY_SANDBOX_REQUIRED`.
+
+Filesystem plugin metadata проходят отдельный FD-boundary: только фиксированные
+файлы внутри native `.dist-info`, без symlink и special files, с byte caps и
+проверкой подмены во время чтения. Неподдерживаемый metadata provider отклоняется
+fail closed и не переключается на небounded stdlib getters.
+
 ### Инварианты импорта
 
 `import structuraguard` MUST NOT:
@@ -167,7 +198,7 @@ output остаются недоверенными данными.
 - создавать schema, tables, staging resources или другие persistent objects;
 - менять root logger или глобальную конфигурацию процесса.
 
-В M1 top-level exports ленивые: обычный `import structuraguard` не
+Top-level exports остаются ленивыми: обычный `import structuraguard` не
 загружает Pydantic, а `SDKConfig` и facade подгружаются при явном
 обращении к символу. Сам core StructuraGuard не читает environment;
 инициализация сторонней dependency начинается только за этой явной
@@ -179,9 +210,9 @@ output остаются недоверенными данными.
 ## Целевой pipeline
 
 После реализации соответствующих milestones полный ingest run должен проходить
-следующие логические фазы. В M2 подтверждены только DTO и port boundaries этой
-схемы; orchestration и concrete adapters ещё отсутствуют. Нормативный scope
-contracts задан [разделом M2 технического задания][spec-m2].
+следующие логические фазы. В M3 подтверждены DTO/port boundaries и parser
+registry, но orchestration и concrete format adapters ещё отсутствуют.
+Нормативный scope registry задан [разделом M3 технического задания][spec-m3].
 
 1. Создание контекста run, безопасное чтение источника, проверка лимитов и
    вычисление source fingerprint.
@@ -505,15 +536,18 @@ outcome.
 [ADR 0002]: adr/0002-security-boundary-defaults.md
 [ADR 0003]: adr/0003-two-stage-parsing-contracts.md
 [spec-m2]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m2-доменные-модели-и-contracts
+[spec-m3]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m3-parser-registry
 [spec-nfr-010]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#nfr-010-отмена-и-timeout
 [spec-public-api]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#23-публичный-api-sdk
 
-## Вне архитектурного scope M0–M2
+## Вне архитектурного scope M0–M3
 
 M0 не определял точные DTO, package layout, SQL schema staging или выбор
 библиотек adapters. M1 зафиксировал package scaffold. M2 фиксирует DTO,
-fingerprint/serialization rules и adapter protocols, но не реализует pipeline,
-format parsers, analyzers/executors, DB reflection/load или LLM providers.
+fingerprint/serialization rules и adapter protocols. M3 реализует parser
+registry и descriptor-only plugin discovery, но не реализует pipeline, format
+parsers, analyzers/executors, DB reflection/load, LLM providers или sandbox
+runner.
 Численные resource limits канонически задаются в
 [требованиях](requirements.md) и не дублируются здесь. M0 не включает web
 deployment, worker, UI, OCR/media processing, administrative migrations и

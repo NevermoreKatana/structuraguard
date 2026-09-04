@@ -1,28 +1,30 @@
 # Состояние проекта StructuraGuard
 
-Обновлено: 2026-09-03.
+Обновлено: 2026-09-04.
 
 ## Текущая версия и milestone
 
-- Версия package: `0.2.0`.
-- Текущий milestone: `M2 — Доменные модели и contracts`; локальная реализация
-  завершена, но финальная приёмка заблокирована двумя High security findings в
-  validation/report contracts.
-- Активная ветка: `main`; изменения M2 находятся в рабочем дереве.
-- Следующий планируемый milestone после закрытия M2: `M3 — Parser Registry и
-  плагины`.
+- Версия package: `0.3.0`.
+- Текущий milestone: `M3 — Parser Registry и безопасное discovery parser
+  plugins`; локальная реализация проверена и готова к ручному commit и Pull
+  Request в `main`.
+- Активная ветка: `feat/m03-parser-registry`; изменения M3 находятся в
+  рабочем дереве.
+- Следующий планируемый milestone: `M4 — Базовые format parsers`.
 
-Канонический scope: [M2 в техническом задании][spec-m2]. Реализации adapters,
-pipeline и facade следующих milestone не считаются доступными.
+Канонический scope: [M3 в техническом задании][spec-m3]. Реальные format
+adapters, semantic services и pipeline следующих milestones не считаются
+доступными.
 
 ## Состояние milestones
 
 - `M0` — зафиксированы требования, архитектурный baseline и модель угроз.
 - `M1` — создан устанавливаемый typed package с проверяемым scaffold.
 - `M2` — реализация завершена: добавлены immutable domain contracts и protocols
-  двухэтапного parsing; перед commit остаются два security blockers, которых не
-  обнаруживает текущий зелёный suite.
-- `M3`–`M17` — не начаты.
+  двухэтапного parsing.
+- `M3` — реализация завершена: добавлены instance-local parser registry,
+  deterministic selection и descriptor-only opt-in plugin discovery.
+- `M4`–`M17` — не начаты.
 
 ## Реализованные публичные contracts
 
@@ -38,6 +40,15 @@ pipeline и facade следующих milestone не считаются дост
 - `Parser` возвращает только raw physical structure; semantic values возникают
   только после применения `ValidatedParsePlan`. DB execution принимает только
   `ValidatedMappingPlan`, связанный с catalog/target/policy fingerprints.
+- `structuraguard.parsers` экспортирует registry/snapshot/session и
+  discovery contracts. Facades принимают `parser_registry` через dependency
+  injection и возвращают его через `parsers`; default registry instance-local.
+- Manual trusted parsers регистрируются явно. Selection использует strong
+  content evidence, `confidence`, `priority` и canonical ID; MIME/extension
+  conflicts становятся warning либо `PARSER_FORMAT_CONFLICT`.
+- Entry points группы `structuraguard.parsers` обнаруживаются только явным
+  вызовом с allowlist. Discovery не вызывает `EntryPoint.load()` и отражает
+  ошибки отдельных distributions без прекращения обработки остальных.
 - Public DTO используют strict frozen Pydantic contracts, tuple collections,
   tagged scalars, UTC datetime, `Decimal` для money и обязательную provenance.
   Persisted SHA-256 имеет единственную форму `sha256:<64 lowercase hex>`.
@@ -48,10 +59,10 @@ pipeline и facade следующих milestone не считаются дост
   и всю execution fingerprint chain.
 
 Concrete format parsers, semantic analyzer/validator/executor, DB reflection и
-load, LLM providers, staging/audit backends, state machine и orchestrator не
-реализованы.
+load, LLM providers, staging/audit backends, sandbox runner, state machine и
+orchestrator не реализованы.
 
-## Известное ограничение M2
+## Известные ограничения M3
 
 Lineage-aware summaries и pure stream validation позволяют обнаруживать foreign
 non-terminal batches, несовпадающие counts и глобальные duplicate normalized IDs
@@ -59,26 +70,40 @@ non-terminal batches, несовпадающие counts и глобальные 
 он перечисляет только разрешённые sample/evidence/selectors, а не копирует каждый
 physical объект большого источника.
 
-## Последние успешные quality gates
+Discovery валидирует только metadata allowlisted distributions и не загружает
+plugin code. Filesystem metadata читаются через bounded FD-reader; unsafe path,
+oversized файл, ZIP/custom provider и платформа без безопасного `dir_fd`
+отклоняются. Host metadata finder и подмена artifact после discovery остаются
+границами доверия до isolated runtime M12. Исполнение untrusted descriptor до
+M12 запрещено: `activate_plugin()` завершается `SECURITY_SANDBOX_REQUIRED`.
 
-- `make check`: lock check, Ruff для 53 файлов, strict mypy для 51 файла,
-  `600 passed` на Python 3.12, MkDocs strict — успешно.
-- Собраны `structuraguard-0.2.0.tar.gz` и
-  `structuraguard-0.2.0-py3-none-any.whl`; wheel повторно собран из sdist.
-- Installed-wheel black-box/attribution smoke подтвердил root/contracts/ports
-  exports, import-safety, отсутствие optional/infrastructure imports и утечки
-  source checkout.
+Публичный parser contract возвращает базовый `AsyncIterator[ExtractedBatch]`.
+Если trusted adapter владеет внешним ресурсом, его custom iterator должен сам
+предоставить корректный `aclose()`; без close-hook SDK может перевести wrapper
+в quarantined state, но не может принудительно освободить ресурс adapter.
+Обязательный close-capable protocol требует отдельного изменения публичного
+contract.
+
+## Quality gates M3
+
+- Итоговый `make check` — успешно; включает все перечисленные ниже локальные
+  gates.
+- `make sync` и lock check — успешно.
+- `make lint` — Ruff для 73 файлов, успешно.
+- `make typecheck` — strict mypy для 71 source files, успешно.
+- `make test` — `830 passed` на Python 3.12.
+- `make docs` — MkDocs strict, успешно.
+- `make test-build` — собраны и проверены
+  `structuraguard-0.3.0.tar.gz` и
+  `structuraguard-0.3.0-py3-none-any.whl`; wheel повторно собран из sdist,
+  установлен изолированно и прошёл black-box/attribution import probes.
+- `git diff --check`, secret/debug scan и audit untracked/generated artifacts —
+  успешно; build outputs и caches исключены через `.gitignore`.
 
 ## Открытые блокеры
 
-- `IssueCodeStr` пропускает credential-like значения в `ValidationIssue`, откуда
-  они сериализуются в reports/audit.
-- Redacted `ValidationError` сохраняет исходную ошибку с raw input в
-  `__context__` при constructor и union validation failures.
-
-Оба finding требуют security regression tests и локального исправления до
-ручного commit. Remote CI не запускался: он сможет независимо подтвердить
-результат после публикации исправлений в ветку/PR.
+Известных блокеров внутри scope M3 нет. Remote CI не запускался: он сможет
+независимо подтвердить результат после публикации изменений в ветку/PR.
 
 ## Принятые архитектурные решения
 
@@ -91,9 +116,7 @@ physical объект большого источника.
 
 ## Следующий рекомендуемый шаг
 
-Исправить два security blockers M2, повторить review и quality gates, затем
-подготовить исполнимый план M3 по [каноническому разделу M3][spec-m3], не
-расширяя M2 реализациями adapters.
+Подготовить план M4 для concrete format
+parsers. Не добавлять semantic analyzer или orchestrator в M4 parser slice.
 
-[spec-m2]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m2-доменные-модели-и-contracts
-[spec-m3]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m3-parser-registry-и-плагины
+[spec-m3]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m3-parser-registry

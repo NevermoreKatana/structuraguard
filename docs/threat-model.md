@@ -3,7 +3,7 @@
 ## Статус документа
 
 Этот документ задаёт нормативную модель угроз для design baseline M0 и отмечает
-ограниченный runtime subset, подтверждённый в M1–M2. Каждый control имеет два
+ограниченный runtime subset, подтверждённый в M1–M3. Каждый control имеет два
 независимых статуса:
 
 - нормативный статус `REQUIRED`: control обязателен для приёмки затронутой
@@ -30,11 +30,16 @@
 - `contracts`, `domain` и `ports` не импортируют infrastructure и не выполняют
   I/O при импорте.
 
+В M3 дополнительно реализованы parser registry controls: instance-local state,
+frozen selection session, проверка content evidence и physical
+`ExtractedBatch`, а также opt-in descriptor-only discovery allowlisted entry
+points без host-side import или constructor.
+
 Redaction ошибки является defense-in-depth и не распознаёт произвольный secret
 под нейтральным именем. Caller обязан передавать только safe `message`, `details`
-и `run_id`. Pipeline, parser, DB, LLM, stores, audit и end-to-end output controls
-остаются `PLANNED`. Отсутствие обязательного control приводит к явному отказу;
-небезопасный fallback запрещён.
+и `run_id`. Concrete format parser, sandbox runner, pipeline, DB, LLM, stores,
+audit и end-to-end output controls остаются `PLANNED`. Отсутствие обязательного
+control приводит к явному отказу; небезопасный fallback запрещён.
 
 Модель конкретизирует security boundary defaults из
 [ADR 0002](adr/0002-security-boundary-defaults.md). Scope продукта и форматы
@@ -245,11 +250,14 @@ path traversal, symlink/TOCTOU race или special file; XXE/DTD; YAML object
 construction или alias bomb; HTML active content; archive bomb; macro/executable
 payload; resource exhaustion.
 
-**Controls:** `REQUIRED`; implementation `PLANNED` (`M3`, `M4`, `M12`).
+**Controls:** `REQUIRED`; registry detection boundary `IMPLEMENTED` (`M3`),
+format-specific parsing и sandbox isolation `PLANNED` (`M4`, `M12`).
 
-- Detection сверяет content/signature, declared MIME и extension. Mismatch
-  создаёт security event; policy выбирает review либо rejection, но не молча
-  доверяет extension.
+- Detection сверяет content/signature, declared MIME и extension. В M3
+  metadata mismatch возвращает typed warning code, а несовместимые
+  strong signals — typed `PARSER_FORMAT_CONFLICT`. Создание `SecurityEvent`
+  и routing через review/rejection policy остаются `PLANNED` вместе с
+  orchestrator; extension не становится trusted signal.
 - Path открывается descriptor-first внутри allowed root без follow symlink.
   Regular-file type, identity и limits проверяются после open; те же bytes
   используются для parsing и fingerprint. Directory, device, FIFO, socket и
@@ -298,7 +306,8 @@ source hash, сработавший limit и sanitized parser outcome. Raw paylo
 filesystem или network access; secret discovery; fork/pid exhaustion; forged
 normalized output; unsafe in-process fallback.
 
-**Controls:** `REQUIRED`; implementation `PLANNED` (`M3`, `M12`).
+**Controls:** `REQUIRED`; registry/discovery boundary `IMPLEMENTED` (`M3`),
+sandbox execution `PLANNED` (`M12`).
 
 - Registry instance-local и frozen на время run. Adapter ID, version/fingerprint
   и trust decision входят в reproducibility metadata.
@@ -308,7 +317,20 @@ normalized output; unsafe in-process fallback.
 - Untrusted parser принимается только как декларативный descriptor. Resolution
   pinned artifact/module, import и constructor выполняются внутри
   `SandboxParserRunner`; host-side import/constructor отсутствует.
+- Entry-point discovery запускается только явным вызовом с непустым allowlist и
+  exact group `structuraguard.parsers`. Недоверенные metadata ограничены и
+  нормализуются до descriptor; `EntryPoint.load()` при discovery запрещён.
+- Filesystem `.dist-info` читается только через pinned directory/file
+  descriptors, fixed filenames, `O_NOFOLLOW`, regular-file checks и hard byte
+  caps. ZIP/custom metadata providers, symlink/FIFO/device и небезопасная
+  платформа отклоняются до обращения к metadata getters.
+- Сбой metadata одной allowlisted distribution отражается typed issue без raw
+  metadata и не останавливает discovery остальных distributions. Успешный
+  результат и issues возвращаются вместе, поэтому partial discovery не
+  изображается полностью успешным.
 - Strict/untrusted execution допускается только через `SandboxParserRunner`.
+- M3 `activate_plugin()` является refusal boundary: известный descriptor без
+  sandbox даёт `SECURITY_SANDBOX_REQUIRED`, не вызывая import/load target.
 - Sandbox запускается non-root, без network, secrets и Docker socket, с
   read-only filesystem кроме isolated temporary directory, CPU/memory/pid limits
   и timeout. Cleanup выполняется при success, failure и cancellation.
@@ -658,12 +680,16 @@ error содержит стабильный `error_code`, безопасный `
 
 ## План security regression evidence
 
-Сценарии adapter/runtime ниже остаются `REQUIRED / PLANNED`. Contract-level
-invalid-state, SQL/code-field, import-boundary и canonical payload tests имеют
-evidence M2.
+Все сценарии ниже остаются `REQUIRED`. M3 даёт registry-level evidence для
+`SR-01`, descriptor fail-closed части `SR-08`, physical output boundary
+`SR-10` и host-import запрета `SR-24`. Format-specific, sandbox, pipeline и DB
+части остаются `PLANNED`. Остальные contract-level invalid-state,
+SQL/code-field, import-boundary и canonical payload tests имеют evidence M2.
 
-- `SR-01` (`M3`, `M4`): extension/MIME/signature conflict создаёт event и не
-  обходится молча.
+- `SR-01` (`M3`, `M4`): extension/MIME/signature conflict в M3 возвращает
+  warning code либо typed `PARSER_FORMAT_CONFLICT` и не обходится
+  молча. `SecurityEvent` и policy routing остаются `PLANNED` до
+  orchestrator.
 - `SR-02` (`M4`, `M12`): malformed container не раскрывает raw bytes/paths в
   error.
 - `SR-03` (`M4`, `M12`): XML XXE/DTD не читает file и не выполняет network

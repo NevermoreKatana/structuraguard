@@ -31,7 +31,7 @@ from pathlib import Path, PurePosixPath
 from typing import cast
 
 _DISTRIBUTION_NAME = "structuraguard"
-_VERSION = "0.2.0"
+_VERSION = "0.3.0"
 _WHEEL_NAME = f"{_DISTRIBUTION_NAME}-{_VERSION}-py3-none-any.whl"
 _SDIST_NAME = f"{_DISTRIBUTION_NAME}-{_VERSION}.tar.gz"
 _DIST_INFO = f"{_DISTRIBUTION_NAME}-{_VERSION}.dist-info"
@@ -48,12 +48,19 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/contracts/mapping.py",
         "structuraguard/contracts/normalized.py",
         "structuraguard/contracts/parsing.py",
+        "structuraguard/contracts/plugins.py",
         "structuraguard/contracts/reports.py",
         "structuraguard/contracts/source.py",
         "structuraguard/domain/__init__.py",
         "structuraguard/domain/canonical.py",
         "structuraguard/domain/lineage.py",
         "structuraguard/exceptions.py",
+        "structuraguard/parsers/__init__.py",
+        "structuraguard/parsers/_registration.py",
+        "structuraguard/parsers/discovery.py",
+        "structuraguard/parsers/execution.py",
+        "structuraguard/parsers/registry.py",
+        "structuraguard/parsers/selection.py",
         "structuraguard/ports/__init__.py",
         "structuraguard/ports/database.py",
         "structuraguard/ports/llm.py",
@@ -162,11 +169,17 @@ _CONTRACT_EXPORTS = frozenset(
         "ParsePlanValidationRequest",
         "ParsePlanValidationResult",
         "ParseRule",
+        "PARSER_ENTRY_POINT_GROUP",
+        "ParserDiscoveryPolicy",
+        "ParserPluginDescriptor",
         "PhysicalObjectKind",
         "PhysicalSample",
         "PhysicalSourceRef",
         "PipelineStatus",
         "ProbeResult",
+        "ProbeSignal",
+        "ProbeSignalKind",
+        "ProbeSignalOutcome",
         "ProducerMetadata",
         "PrefixTokenStart",
         "ProviderCapabilities",
@@ -236,6 +249,20 @@ _PORT_EXPORTS = frozenset(
         "SecurityScanner",
         "SemanticStructureAnalyzer",
         "StagingStore",
+    }
+)
+_PARSER_EXPORTS = frozenset(
+    {
+        "PARSER_ENTRY_POINT_GROUP",
+        "ParserIdentity",
+        "ParserPluginDiscoveryFailure",
+        "ParserPluginDiscoveryReport",
+        "ParserRegistry",
+        "ParserRegistrySession",
+        "ParserRegistrySnapshot",
+        "SelectedParser",
+        "ValidatedParserStream",
+        "discover_parser_plugins",
     }
 )
 _OPTIONAL_DEPENDENCIES = {
@@ -1214,6 +1241,7 @@ def _probe_source(
     exports_json = json.dumps(sorted(_PUBLIC_EXPORTS))
     contract_exports_json = json.dumps(sorted(_CONTRACT_EXPORTS))
     domain_exports_json = json.dumps(sorted(_DOMAIN_EXPORTS))
+    parser_exports_json = json.dumps(sorted(_PARSER_EXPORTS))
     port_exports_json = json.dumps(sorted(_PORT_EXPORTS))
     forbidden_json = json.dumps(sorted(_FORBIDDEN_DEPENDENCIES))
     optional_json = json.dumps(sorted(_FORBIDDEN_OPTIONAL_IMPORTS))
@@ -1229,6 +1257,7 @@ def _probe_source(
         expected_exports = set(json.loads({exports_json!r}))
         expected_contract_exports = set(json.loads({contract_exports_json!r}))
         expected_domain_exports = set(json.loads({domain_exports_json!r}))
+        expected_parser_exports = set(json.loads({parser_exports_json!r}))
         expected_port_exports = set(json.loads({port_exports_json!r}))
         forbidden_roots = set(json.loads({forbidden_json!r}))
         optional_roots = set(json.loads({optional_json!r}))
@@ -1265,11 +1294,13 @@ def _probe_source(
 
         import structuraguard.contracts as contracts
         import structuraguard.domain as domain
+        import structuraguard.parsers as parsers
         import structuraguard.ports as ports
 
         for module, expected in (
             (contracts, expected_contract_exports),
             (domain, expected_domain_exports),
+            (parsers, expected_parser_exports),
             (ports, expected_port_exports),
         ):
             module_exports = tuple(module.__all__)

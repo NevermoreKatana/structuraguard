@@ -4,6 +4,7 @@ import _thread
 import asyncio
 import importlib
 import importlib.machinery
+import importlib.metadata
 import importlib.util
 import logging
 import os
@@ -528,6 +529,11 @@ def _install_guards(
 
     setattr(signal, "signal", _fail)
 
+    setattr(importlib.metadata, "distribution", _fail)
+    setattr(importlib.metadata, "distributions", _fail)
+    setattr(importlib.metadata, "entry_points", _fail)
+    setattr(importlib.metadata.EntryPoint, "load", _fail)
+
     root = logging.getLogger()
     setattr(logging, "basicConfig", _fail)
     setattr(logging, "captureWarnings", _fail)
@@ -724,10 +730,30 @@ def run_probe(mode: str) -> None:
         default_sync_sdk = module.StructuraGuard()
         if default_async_sdk.config is default_sync_sdk.config:
             raise ForbiddenSideEffect("facades share a default SDKConfig instance")
+        if default_async_sdk.parsers is default_sync_sdk.parsers:
+            raise ForbiddenSideEffect("facades share a default ParserRegistry instance")
+        parsers_module = importlib.import_module("structuraguard.parsers")
+        parser_registry = parsers_module.ParserRegistry()
+        injected_async_sdk = module.AsyncStructuraGuard(
+            parser_registry=parser_registry,
+        )
+        injected_sync_sdk = module.StructuraGuard(
+            parser_registry=parser_registry,
+        )
+        if (
+            injected_async_sdk.parsers is not parser_registry
+            or injected_sync_sdk.parsers is not parser_registry
+        ):
+            raise ForbiddenSideEffect("facade replaced an explicit ParserRegistry")
         contracts_module = importlib.import_module("structuraguard.contracts")
         domain_module = importlib.import_module("structuraguard.domain")
         ports_module = importlib.import_module("structuraguard.ports")
-        for checked_module in (contracts_module, domain_module, ports_module):
+        for checked_module in (
+            contracts_module,
+            domain_module,
+            parsers_module,
+            ports_module,
+        ):
             exports = tuple(checked_module.__all__)
             if len(exports) != len(set(exports)):
                 raise ForbiddenSideEffect(

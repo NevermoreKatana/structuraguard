@@ -53,3 +53,4 @@ nav:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
       - M02 — domain contracts: plans/M02_domain_contracts.md
+      - M03 — parser registry: plans/M03_parser_registry.md
