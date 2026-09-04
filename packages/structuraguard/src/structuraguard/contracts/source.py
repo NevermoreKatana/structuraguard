@@ -26,6 +26,7 @@ from structuraguard.contracts.common import (
     FiniteFloat,
     IdentifierStr,
     NonNegativeInt,
+    ParserIdentifierStr,
     PhysicalObjectKind,
     PhysicalSourceRef,
     PositiveInt,
@@ -57,8 +58,68 @@ class SourceArtifact(FrozenContract):
         )
 
 
+class ProbeSignalKind(StrEnum):
+    """Закрытые виды сигналов технического определения формата.
+
+    ``SIGNATURE``, ``CONTENT_MEDIA_TYPE`` и ``INTERNAL_STRUCTURE`` являются
+    сильными сигналами. ``DECLARED_MEDIA_TYPE`` и ``EXTENSION`` используются
+    как advisory metadata и сами по себе не подтверждают формат.
+    """
+
+    SIGNATURE = "signature"
+    CONTENT_MEDIA_TYPE = "content_media_type"
+    INTERNAL_STRUCTURE = "internal_structure"
+    DECLARED_MEDIA_TYPE = "declared_media_type"
+    EXTENSION = "extension"
+
+
+class ProbeSignalOutcome(StrEnum):
+    """Исход сравнения одного сигнала с форматом parser."""
+
+    MATCH = "match"
+    MISMATCH = "mismatch"
+    INCONCLUSIVE = "inconclusive"
+
+
+class ProbeSignal(FrozenContract):
+    """Один ограниченный сигнал без raw source и произвольных метаданных.
+
+    Args:
+        kind: Вид проверенного сигнала.
+        outcome: Совпадение, несовпадение или отсутствие достаточных данных.
+
+    Raises:
+        pydantic.ValidationError: Если передан неизвестный вид или исход.
+    """
+
+    kind: ProbeSignalKind
+    outcome: ProbeSignalOutcome
+
+
 class ProbeResult(FrozenContract):
-    """Результат безопасного технического определения формата."""
+    """Результат безопасного технического определения формата.
+
+    Args:
+        source: Fingerprint-bound ссылка на проверенный source snapshot.
+        adapter_id: Идентификатор выполнившего probe parser adapter.
+        adapter_version: Версия parser adapter.
+        supported: Подтвердил ли parser поддержку формата.
+        confidence: Оценка уверенности от 0 до 1.
+        detected_media_type: Media type, определённый по содержимому.
+        detected_encoding: Определённая кодировка, если она применима.
+        warnings: Уникальные machine-readable warning codes.
+        format_id: Канонический идентификатор подтверждённого формата.
+        signals: Не более пяти сигналов с уникальными ``kind``.
+
+    Raises:
+        pydantic.ValidationError: Если нарушены типы, пределы или инварианты DTO.
+
+    Для ``supported=True`` DTO требует ``detected_media_type``. Registry перед
+    выбором дополнительно требует положительный ``confidence``, ``format_id``,
+    сильный совпавший сигнал и отсутствие сильного несовпадения. Несовпадение
+    заявленного MIME или extension отражается warning code, а неоднозначные
+    сильные сигналы приводят к typed ``ParserError``.
+    """
 
     source: SourceArtifactRef
     adapter_id: IdentifierStr
@@ -68,6 +129,8 @@ class ProbeResult(FrozenContract):
     detected_media_type: IdentifierStr | None = None
     detected_encoding: IdentifierStr | None = None
     warnings: tuple[IdentifierStr, ...] = ()
+    format_id: ParserIdentifierStr | None = None
+    signals: Annotated[tuple[ProbeSignal, ...], Field(max_length=5)] = ()
 
     @model_validator(mode="after")
     def _require_detection_for_supported_source(self) -> Self:
@@ -75,6 +138,9 @@ class ProbeResult(FrozenContract):
             raise ValueError("Поддерживаемый источник должен иметь detected_media_type")
         if len(self.warnings) != len(set(self.warnings)):
             raise ValueError("Probe warnings должны быть уникальны")
+        signal_kinds = tuple(signal.kind for signal in self.signals)
+        if len(signal_kinds) != len(set(signal_kinds)):
+            raise ValueError("Probe signal kinds должны быть уникальны")
         return self
 
 
@@ -518,6 +584,17 @@ class ExtractedBatch(FrozenContract):
             parser_version=self.parser_version,
             physical_ref_count=len(self._physical_refs()),
         )
+
+    def physical_refs(self) -> tuple[PhysicalSourceRef, ...]:
+        """Вернуть ссылки на все адресуемые физические объекты batch.
+
+        Returns:
+            Новый immutable tuple в детерминированном порядке обхода объектов.
+
+        Метод не возвращает raw values и не выполняет I/O.
+        """
+
+        return self._physical_refs()
 
     def _validate_terminal_manifest(self) -> None:
         if self.is_last and self.manifest is None:

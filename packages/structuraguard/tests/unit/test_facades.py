@@ -2,20 +2,30 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from importlib import metadata
 from typing import Never, Protocol
 
 import pytest
 
 from structuraguard import AsyncStructuraGuard, SDKConfig, StructuraGuard
+from structuraguard.parsers import ParserRegistry
 
 
 class _ConfiguredFacade(Protocol):
     @property
     def config(self) -> SDKConfig: ...
 
+    @property
+    def parsers(self) -> ParserRegistry: ...
+
 
 class _FacadeFactory(Protocol):
-    def __call__(self, *, config: SDKConfig | None = None) -> _ConfiguredFacade: ...
+    def __call__(
+        self,
+        *,
+        config: SDKConfig | None = None,
+        parser_registry: ParserRegistry | None = None,
+    ) -> _ConfiguredFacade: ...
 
 
 FACADE_FACTORIES: tuple[_FacadeFactory, ...] = (
@@ -48,6 +58,48 @@ def test_facade_creates_an_instance_local_default_config(
     assert isinstance(first_config, SDKConfig)
     assert isinstance(second_config, SDKConfig)
     assert first_config is not second_config
+
+
+@pytest.mark.parametrize("facade_factory", FACADE_FACTORIES)
+def test_facade_uses_explicit_parser_registry(
+    facade_factory: _FacadeFactory,
+) -> None:
+    registry = ParserRegistry()
+
+    facade = facade_factory(parser_registry=registry)
+
+    assert facade.parsers is registry
+
+
+@pytest.mark.parametrize("facade_factory", FACADE_FACTORIES)
+def test_facade_creates_an_instance_local_default_parser_registry(
+    facade_factory: _FacadeFactory,
+) -> None:
+    first = facade_factory()
+    second = facade_factory()
+
+    assert isinstance(first.parsers, ParserRegistry)
+    assert isinstance(second.parsers, ParserRegistry)
+    assert first.parsers is not second.parsers
+
+
+@pytest.mark.parametrize("facade_factory", FACADE_FACTORIES)
+def test_facade_construction_does_not_start_plugin_discovery(
+    facade_factory: _FacadeFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(metadata, "distribution", _forbidden_runtime_creation)
+    monkeypatch.setattr(metadata, "distributions", _forbidden_runtime_creation)
+    monkeypatch.setattr(metadata, "entry_points", _forbidden_runtime_creation)
+    monkeypatch.setattr(
+        metadata.EntryPoint,
+        "load",
+        _forbidden_runtime_creation,
+    )
+
+    facade = facade_factory()
+
+    assert isinstance(facade.parsers, ParserRegistry)
 
 
 def test_sync_facade_is_not_an_async_facade_subclass() -> None:

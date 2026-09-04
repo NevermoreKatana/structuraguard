@@ -1,7 +1,7 @@
 # Публичный API StructuraGuard
 
-Статус: подтверждённое поведение package `structuraguard` версии `0.2.0` в
-текущей реализации M2. Facade-операции pipeline в эту поставку не входят.
+Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
+текущей реализации M3. Facade-операции pipeline в эту поставку не входят.
 
 Целевой API следующих milestone описан в каноническом разделе
 [23. Публичный API SDK][spec-public-api]. Он не считается доступным, пока
@@ -194,6 +194,228 @@ taxonomy методов ports в M2 не зафиксирована до поя�
 страница описывает только подтверждённую публичную поверхность и не повторяет
 полный текст требований.
 
+## Parser registry M3
+
+`structuraguard.parsers` предоставляет instance-local `ParserRegistry`.
+Глобального mutable registry и decorator auto-registration нет. Facade создаёт
+отдельный пустой registry по умолчанию либо сохраняет явно переданный
+`parser_registry` по identity.
+
+### Manual registration и selection {#m3-registry-copyable-example}
+
+Следующий test double распознаёт только искусственную сигнатуру `DEMO`. Он нужен
+для показа registration и selection, не является готовым format parser и не
+вызывает `parse()`:
+
+<!-- example:m03-registry:start -->
+```python
+import asyncio
+from collections.abc import AsyncIterator
+from decimal import Decimal
+
+from structuraguard import AsyncStructuraGuard
+from structuraguard.contracts import (
+    ExtractedBatch,
+    ProbeResult,
+    ProbeSignal,
+    ProbeSignalKind,
+    ProbeSignalOutcome,
+    SourceArtifact,
+)
+from structuraguard.parsers import ParserRegistry
+from structuraguard.ports.source import ParseContext, ProbeContext
+
+
+class MemoryReader:
+    def __init__(self, content: bytes, source_fingerprint: str) -> None:
+        self._content = content
+        self.source_fingerprint = source_fingerprint
+
+    async def read(self, *, offset: int, size: int) -> bytes:
+        return self._content[offset : offset + size]
+
+
+class DemoParser:
+    adapter_id = "demo.parser"
+    version = "1.0.0"
+    priority = 10
+
+    async def probe(
+        self,
+        source: SourceArtifact,
+        context: ProbeContext,
+    ) -> ProbeResult:
+        prefix = await context.reader.read(
+            offset=0,
+            size=min(4, context.max_probe_bytes),
+        )
+        supported = prefix == b"DEMO"
+        return ProbeResult(
+            source=source.ref,
+            adapter_id=self.adapter_id,
+            adapter_version=self.version,
+            supported=supported,
+            confidence=Decimal("1") if supported else Decimal("0"),
+            detected_media_type="application/x-demo" if supported else None,
+            format_id="demo" if supported else None,
+            signals=(
+                ProbeSignal(
+                    kind=ProbeSignalKind.SIGNATURE,
+                    outcome=ProbeSignalOutcome.MATCH,
+                ),
+            )
+            if supported
+            else (),
+        )
+
+    def parse(
+        self,
+        source: SourceArtifact,
+        context: ParseContext,
+    ) -> AsyncIterator[ExtractedBatch]:
+        del source, context
+        raise NotImplementedError("Пример показывает только selection")
+
+
+async def main() -> None:
+    fingerprint = "sha256:" + "a" * 64
+    source = SourceArtifact(
+        artifact_id="source-1",
+        display_name="input.demo",
+        media_type="application/x-demo",
+        size_bytes=4,
+        source_fingerprint=fingerprint,
+    )
+    probe_context = ProbeContext(
+        reader=MemoryReader(b"DEMO", fingerprint),
+        source_fingerprint=fingerprint,
+        max_probe_bytes=4,
+    )
+
+    registry = ParserRegistry()
+    registry.register(DemoParser())
+    sdk = AsyncStructuraGuard(parser_registry=registry)
+
+    async with sdk.parsers.session() as session:
+        selected = await session.select(source, probe_context)
+        print(selected.adapter_id)
+
+
+asyncio.run(main())
+```
+<!-- example:m03-registry:end -->
+
+Ожидаемый вывод:
+
+```text
+demo.parser
+```
+
+`register()` принимает уже импортированный и созданный trusted parser object.
+Composition owner тем самым явно принимает риск выполнения его in-process кода.
+Canonical `adapter_id` един для manual registrations и plugin descriptors;
+повторное имя либо повторная registration того же object отклоняется typed
+ошибкой без замены существующего parser. Разные экземпляры одного configurable
+класса разрешены только с разными canonical IDs; это не считается class-level
+singleton policy. Bulk registration атомарна и не зависит от порядка входа.
+
+Selection выполняется в async `registry.session()` по immutable snapshot.
+Registry вызывает `probe` последовательно в canonical `adapter_id` order и
+сначала сравнивает подтверждённые содержимым signals: internal structure,
+signature и content-derived MIME. Среди parsers одного подтверждённого
+`format_id` выбор продолжает `ProbeResult.confidence`, parser `priority` и
+лексикографический `adapter_id`. Declared MIME и display-name extension доступны
+probe через `SourceArtifact` вместе с bounded reader из `ProbeContext` и дают
+typed mismatch warnings, но не могут самостоятельно подтвердить формат.
+Равносильные strong signals разных `format_id` возвращают
+`PARSER_FORMAT_CONFLICT`.
+
+Начало выхода из session сразу запрещает новые `select()` и `parse()`, затем
+ждёт выполняющийся probe и закрывает все созданные streams. Cancellation body
+распространяется только после cleanup. Если собственный `aclose()` trusted
+parser завершился ошибкой, stream остаётся quarantined и retryable; ошибка
+видима caller, но registry lease освобождается. Output после начала closing не
+выдаётся. Одиночные body exception, cancellation и cleanup error сохраняют свой
+тип. Если одновременно произошли несколько outcomes, выход возбуждает
+`BaseExceptionGroup`: исходный body exception/cancellation и каждая
+санитизированная `ParserError` доступны как отдельные элементы группы.
+
+Выбранный parser сохраняет исходный port contract:
+`parse(SourceArtifact, ParseContext) -> AsyncIterator[ExtractedBatch]`.
+Registry проверяет физический тип, lineage и terminal manifest. Ни
+`NormalizedBatch`, ни business entities, `ParsePlan` или `MappingPlan` не
+являются допустимым parser output. Parser не получает LLM/DB authority, не
+определяет таблицу назначения и не генерирует SQL.
+
+Если custom iterator trusted parser владеет внешним ресурсом, adapter должен
+предоставить корректный `aclose()`. Базовый `AsyncIterator` не гарантирует этот
+hook: при его отсутствии registry переводит wrapper в quarantined state и
+освобождает lease, но не может принудительно закрыть ресурс adapter.
+
+### Descriptor-only discovery {#m3-discovery-copyable-example}
+
+`discover_plugins()` запускается только явным вызовом с
+`ParserDiscoveryPolicy`, содержащей непустой allowlist distributions. Discovery
+просматривает только exact entry-point group `structuraguard.parsers`, проверяет
+bounded недоверенные metadata и возвращает декларативные
+`ParserPluginDescriptor`. Оно не вызывает `EntryPoint.load()`, не импортирует
+target module и не конструирует plugin. Ошибка отдельной distribution отражается
+в `ParserPluginDiscoveryFailure` внутри `ParserPluginDiscoveryReport` и не
+скрывается, но не мешает обработать остальные allowlisted distributions.
+Валидные descriptors регистрируются в canonical order под per-instance lock;
+каждый отклонённый duplicate остаётся отдельным наблюдаемым failure.
+
+Если distribution `sample-plugin` установлен и объявляет
+`parser.sample = vendor.sample:SampleParser`, metadata можно проверить так:
+
+<!-- example:m03-discovery:start -->
+```python
+from structuraguard.contracts import ParserDiscoveryPolicy
+from structuraguard.parsers import ParserRegistry
+
+registry = ParserRegistry()
+report = registry.discover_plugins(
+    ParserDiscoveryPolicy(allowed_distributions=("sample-plugin",))
+)
+assert report.failures == ()
+assert registry.snapshot().plugins == report.descriptors
+
+descriptor = report.descriptors[0]
+print(
+    descriptor.adapter_id,
+    descriptor.distribution_name,
+    descriptor.module,
+    descriptor.attribute,
+)
+```
+<!-- example:m03-discovery:end -->
+
+Ожидаемый вывод:
+
+```text
+parser.sample sample-plugin vendor.sample SampleParser
+```
+
+Пример читает только metadata и не вызывает `activate_plugin()`. Даже после
+успешного discovery target `vendor.sample:SampleParser` не импортируется и не
+конструируется.
+
+В M3 поддерживается только native-filesystem `PathDistribution`: metadata header
+читается максимум до 64 KiB, `entry_points.txt` — до 256 KiB, а symlink,
+необычный тип файла, ZIP/custom provider или отсутствие безопасного `dir_fd`
+дают typed per-distribution failure. Raw path и содержимое файла в отчёт не
+попадают.
+
+`ParserDiscoveryPolicy` и `ParserPluginDescriptor` экспортируются из
+`structuraguard.contracts`; discovery report/failure и функция низкого уровня
+`discover_parser_plugins()` — из `structuraguard.parsers`.
+
+Descriptor в M3 не исполняется: до появления sandbox runner его activation
+через `registry.activate_plugin(adapter_id)` завершается
+`SECURITY_SANDBOX_REQUIRED` без in-process fallback. Неизвестный ID даёт
+`PARSER_NOT_FOUND`. Реальные format parsers, semantic analyzer и orchestrator в
+M3 отсутствуют.
+
 ## SDKConfig
 
 `SDKConfig` — пустая immutable Pydantic model для composition root M1:
@@ -212,7 +434,9 @@ taxonomy методов ports в M2 не зафиксирована до поя�
 
 `AsyncStructuraGuard` является canonical async-first точкой входа.
 `StructuraGuard` — отдельная composition-based sync-оболочка, а не subclass
-async facade.
+async facade. Обе принимают keyword-only `parser_registry: ParserRegistry | None`
+и публикуют его через read-only свойство `parsers`. Sync facade делегирует тому
+же registry, которым владеет внутренний async facade.
 
 Обе facade объявляют имена будущих операций:
 
@@ -225,8 +449,9 @@ async facade.
 - `ingest`;
 - `propose_schema`.
 
-Их предметные параметры и результаты не являются public contract M1.
-Позиционные и именованные аргументы в M1 не интерпретируются. Async-вызов всегда
+Их предметные параметры и результаты в текущей версии не являются
+public contract. Позиционные и именованные аргументы не интерпретируются.
+Async-вызов всегда
 возбуждает `OperationNotImplementedError` с
 `error_code="SDK_OPERATION_NOT_IMPLEMENTED"` и canonical operation name в
 `details["operation"]`.
@@ -259,10 +484,22 @@ classes не означает, что parser, DB inspector или loader уже 
 | `cause` | Только имя класса исходного исключения либо `None` |
 
 Alias `code` отсутствует. Невалидный `error_code` отклоняется встроенным
-`ValueError`. Facades M1 самостоятельно возбуждают только два стабильных кода:
+`ValueError`. Недоступные pipeline-операции facade самостоятельно возбуждают
+только два стабильных кода:
 
 - `SDK_OPERATION_NOT_IMPLEMENTED`;
 - `SYNC_API_IN_ASYNC_CONTEXT`.
+
+Registry M3 использует `ParserError` со стабильными codes
+`PARSER_INVALID_ADAPTER`, `PARSER_DUPLICATE_REGISTRATION`,
+`PARSER_REGISTRY_FROZEN`, `PARSER_SESSION_CLOSED`, `PARSER_NOT_FOUND`,
+`PARSER_UNSUPPORTED_FORMAT`, `PARSER_DEPENDENCY_UNAVAILABLE`,
+`PARSER_PROBE_FAILED`, `PARSER_PROBE_INVALID`, `PARSER_FORMAT_CONFLICT`,
+`PARSER_PLUGIN_METADATA_INVALID`, `PARSER_PLUGIN_DISCOVERY_FAILED` и
+`PARSER_OUTPUT_INVALID`. Невозможность безопасно активировать untrusted
+descriptor возвращает `SecurityPolicyError` с `SECURITY_SANDBOX_REQUIRED`.
+Расхождение с hints без неоднозначности selection представлено issue codes
+`PARSER_DECLARED_MIME_MISMATCH` и `PARSER_EXTENSION_MISMATCH`.
 
 ### Security semantics ошибок
 
@@ -306,16 +543,21 @@ Redaction является defense-in-depth, а не универсальным 
 относится только к явному вызову операции вне активного loop: тогда приложение
 создаёт краткоживущий loop, после чего получает typed failure.
 
-## Зависимости и ограничения M2
+Импорт `structuraguard.parsers`, создание `ParserRegistry` и создание facade не
+перечисляют distributions и entry points. Metadata discovery является I/O и
+начинается только из явного `discover_plugins()`.
+
+## Зависимости и ограничения M3
 
 - Требуется Python 3.12 или новее.
 - Единственная unconditional runtime dependency — Pydantic v2.
 - Web frameworks отсутствуют в core dependencies.
 - Extras `postgres`, `pdf`, `excel`, `office`, `litellm`, `tika` и `all`
   резервируют dependency bundles. Установка extra не добавляет готовый adapter.
-- Parsers, semantic analyzer/executor, DB inspection/load, validation pipeline и
-  LLM operations не реализованы; доступны только DTO и protocols.
-- M2 не выполняет предметный I/O и не имеет успешного ingest-сценария.
+- Registry и parser boundary реализованы, но concrete format parsers, semantic
+  analyzer/executor, DB inspection/load, validation pipeline и LLM operations
+  отсутствуют.
+- M3 не реализует orchestrator и не имеет успешного ingest-сценария.
 - Terminal manifests сами проверяют terminal batch. Для всей последовательности
   caller обязан один раз передать ordered iterable в `validate_batches()`:
   проверка потоково сверяет lineage-aware summaries, terminal marker, counts и
@@ -328,6 +570,8 @@ Redaction является defense-in-depth, а не универсальным 
 [NFR-012][spec-nfr-012] канонического ТЗ. Локальная трассировка реализации и
 evidence scaffold находится в [плане M1](plans/M01_sdk_scaffold.md), а contracts
 — в [плане M2](plans/M02_domain_contracts.md) и [ADR 0003](adr/0003-two-stage-parsing-contracts.md).
+Реализация registry и discovery прослеживается через
+[план M3](plans/M03_parser_registry.md) и [раздел M3 ТЗ][spec-m3].
 
 [spec-m1]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m1-каркас-python-пакета
 [spec-nfr-001]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#nfr-001-встраиваемость
@@ -335,3 +579,4 @@ evidence scaffold находится в [плане M1](plans/M01_sdk_scaffold.m
 [spec-nfr-012]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#nfr-012-ошибки
 [spec-public-api]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#23-публичный-api-sdk
 [spec-m2]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m2-доменные-модели-и-contracts
+[spec-m3]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m3-parser-registry

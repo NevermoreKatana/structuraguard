@@ -1,10 +1,12 @@
-"""Публичные immutable DTO и wire-контракты milestone M2.
+"""Публичные immutable DTO и wire-контракты StructuraGuard.
 
 Модели запрещают extra fields и отклоняют недопустимые состояния при создании
 через ``pydantic.ValidationError``. Их ``canonical_json()`` формирует
 детерминированное представление. Создание и сериализация не выполняют I/O;
 декларативные plans не содержат полей для Python, shell, SQL или callbacks.
 Строковые значения остаются данными: contract layer их не исполняет.
+Descriptor parser plugin содержит только проверенные метаданные и сам по себе
+не импортирует и не активирует plugin code.
 """
 
 from structuraguard.contracts.common import (
@@ -112,6 +114,11 @@ from structuraguard.contracts.parsing import (
     TreeShapeObservation,
     ValidatedParsePlan,
 )
+from structuraguard.contracts.plugins import (
+    PARSER_ENTRY_POINT_GROUP,
+    ParserDiscoveryPolicy,
+    ParserPluginDescriptor,
+)
 from structuraguard.contracts.reports import (
     AuditEvent,
     LLMRequest,
@@ -144,6 +151,9 @@ from structuraguard.contracts.source import (
     JsonPointerLocation,
     LineRangeLocation,
     ProbeResult,
+    ProbeSignal,
+    ProbeSignalKind,
+    ProbeSignalOutcome,
     SheetCellLocation,
     SourceArtifact,
     SourceLocation,
@@ -152,6 +162,7 @@ from structuraguard.contracts.source import (
 )
 
 __all__ = (
+    "PARSER_ENTRY_POINT_GROUP",
     "AuditEvent",
     "BatchFingerprint",
     "BooleanScalar",
@@ -229,12 +240,17 @@ __all__ = (
     "ParsePlanValidationRequest",
     "ParsePlanValidationResult",
     "ParseRule",
+    "ParserDiscoveryPolicy",
+    "ParserPluginDescriptor",
     "PhysicalObjectKind",
     "PhysicalSample",
     "PhysicalSourceRef",
     "PipelineStatus",
     "PrefixTokenStart",
     "ProbeResult",
+    "ProbeSignal",
+    "ProbeSignalKind",
+    "ProbeSignalOutcome",
     "ProducerMetadata",
     "ProviderCapabilities",
     "RawScalar",

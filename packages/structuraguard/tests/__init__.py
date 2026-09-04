@@ -1,0 +1,1 @@
+"""Общие test helpers StructuraGuard."""
