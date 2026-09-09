@@ -70,6 +70,20 @@ class _SynchronousProbeFailureParser(_SynchronousProbeParser):
         raise self._error
 
 
+class _ContextRecordingParser(FakeParser):
+    def __init__(self, *, probe_result: ProbeResult) -> None:
+        super().__init__(probe_result=probe_result)
+        self.parse_context: ParseContext | None = None
+
+    def parse(
+        self,
+        source: SourceArtifact,
+        context: ParseContext,
+    ) -> AsyncIterator[ExtractedBatch]:
+        self.parse_context = context
+        return super().parse(source, context)
+
+
 class _HostileProbeValue:
     def __repr__(self) -> str:
         return "password=DO_NOT_LEAK_PROBE_SCHEMA"
@@ -1363,3 +1377,45 @@ async def test_selected_handle_rejects_changed_source_metadata_with_same_ref(
     assert raised.value.error_code == "PARSER_OUTPUT_INVALID"
     assert raised.value.details["reason"] == "selected_source_identity"
     assert parser.parse_call_count == 0
+
+
+@pytest.mark.anyio
+async def test_selected_handle_passes_probe_encoding_to_parser_context(
+    source: SourceArtifact,
+    probe_context: ProbeContext,
+) -> None:
+    result = ProbeResult(
+        source=source.ref,
+        adapter_id="fake.parser",
+        adapter_version="1.0.0",
+        supported=True,
+        confidence=Decimal("0.90"),
+        detected_media_type="text/plain",
+        detected_encoding="cp1251",
+        format_id="txt",
+        signals=(
+            _signal(
+                ProbeSignalKind.INTERNAL_STRUCTURE,
+                ProbeSignalOutcome.MATCH,
+            ),
+        ),
+    )
+    parser = _ContextRecordingParser(probe_result=result)
+    registry = ParserRegistry()
+    registry.register(parser)
+    parse_context = ParseContext(
+        reader=probe_context.reader,
+        source_fingerprint=source.source_fingerprint,
+        max_bytes=32,
+        max_records=10,
+        max_nesting_depth=4,
+    )
+
+    async with registry.session() as session:
+        selected = await session.select(source, probe_context)
+        stream = selected.parse(source, parse_context)
+
+        assert parse_context.detected_encoding is None
+        assert parser.parse_context is not None
+        assert parser.parse_context.detected_encoding == "cp1251"
+        await stream.aclose()

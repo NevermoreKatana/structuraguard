@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import replace
+from enum import StrEnum
 from typing import Never, Protocol, cast, runtime_checkable
 
 from structuraguard.contracts.common import PhysicalSourceRef
@@ -17,6 +19,7 @@ from structuraguard.contracts.source import (
 from structuraguard.exceptions import ParserError, SecurityPolicyError
 from structuraguard.ports.source import ParseContext
 
+from ._hashing import batch_fingerprint, manifest_fingerprint
 from ._registration import RegisteredParser
 
 
@@ -34,6 +37,15 @@ type _BoundaryError = ParserError | SecurityPolicyError | asyncio.CancelledError
 type _BoundaryFailureFactory = Callable[
     [BaseException], ParserError | SecurityPolicyError
 ]
+type _AllowedDetailPolicy = tuple[tuple[str, frozenset[str]], ...]
+
+_MAX_INDEXED_REFS = 10_000
+_MAX_SAFE_SOURCE_POSITION = 2**63 - 1
+
+
+class _PreflightLimit(StrEnum):
+    RECORDS = "records"
+    PHYSICAL_OBJECTS = "physical_objects"
 
 
 def _output_error(
@@ -61,6 +73,108 @@ def _detach_security_error(error: SecurityPolicyError) -> SecurityPolicyError:
     if hasattr(error, "__notes__"):
         del error.__notes__
     return error
+
+
+def _allowed_parser_error_policy(
+    error_code: str,
+) -> tuple[str, _AllowedDetailPolicy] | None:
+    if error_code == "PARSER_MALFORMED_INPUT":
+        return (
+            "Parser отклонил некорректный входной формат.",
+            (
+                (
+                    "reason",
+                    frozenset(
+                        {
+                            "binary_content",
+                            "dangling_escape",
+                            "inconsistent_record",
+                            "invalid_escape",
+                            "invalid_json",
+                            "invalid_xml",
+                            "invalid_html",
+                            "invalid_yaml",
+                            "invalid_yaml_alias",
+                            "invalid_yaml_anchor",
+                            "invalid_unicode_scalar",
+                            "invalid_tika_response",
+                            "reader_result_size",
+                            "reader_result_type",
+                            "trailing_content",
+                            "unexpected_character_after_quote",
+                            "unexpected_eof",
+                            "unexpected_quote",
+                            "unterminated_quote",
+                        }
+                    ),
+                ),
+            ),
+        )
+    if error_code == "PARSER_UNSUPPORTED_FEATURE":
+        return (
+            "Parser не поддерживает обнаруженную возможность формата.",
+            (
+                (
+                    "feature",
+                    frozenset(
+                        {
+                            "ambiguous_dialect",
+                            "configured_template",
+                            "dialect_detection",
+                        }
+                    ),
+                ),
+                (
+                    "reason",
+                    frozenset({"feature_disabled", "insufficient_structure"}),
+                ),
+            ),
+        )
+    if error_code == "PARSER_ENCODING_UNSUPPORTED":
+        return (
+            "Parser не может безопасно определить или декодировать кодировку.",
+            (
+                (
+                    "reason",
+                    frozenset({"decode_failed", "undetermined", "unsupported_codec"}),
+                ),
+            ),
+        )
+    if error_code == "PARSER_DEPENDENCY_UNAVAILABLE":
+        return (
+            "Требуется optional parser extra.",
+            (("extra", frozenset({"xml", "yaml", "excel", "pdf", "office", "tika"})),),
+        )
+    if error_code == "PARSER_TIKA_UNAVAILABLE":
+        return ("Tika endpoint недоступен.", ())
+    if error_code == "PARSER_NO_TEXT_LAYER":
+        return ("PDF не содержит извлекаемого текстового слоя.", ())
+    if error_code == "PROCESSING_TIMEOUT":
+        return ("Истёк timeout parser.", ())
+    return None
+
+
+def _rebuild_allowed_parser_error(error: ParserError) -> ParserError | None:
+    """Создать безопасный public outcome из минимальной части adapter error."""
+
+    policy = _allowed_parser_error_policy(error.error_code)
+    if policy is None:
+        return None
+    message, allowed_details = policy
+    details: dict[str, str | int] = {}
+    for key, allowed_values in allowed_details:
+        value = error.details.get(key)
+        if type(value) is str and value in allowed_values:
+            details[key] = value
+    for key in ("record_number", "line_number"):
+        value = error.details.get(key)
+        if type(value) is int and 1 <= value <= _MAX_SAFE_SOURCE_POSITION:
+            details[key] = value
+    return ParserError(
+        error_code=error.error_code,
+        message=message,
+        details=details,
+    )
 
 
 def _sanitize_cancelled_error(
@@ -260,11 +374,34 @@ class SelectedParser:
                 raise _output_error(self.adapter_id, "selected_source_identity")
             if context.source_fingerprint != source.source_fingerprint:
                 raise _output_error(self.adapter_id, "context_source_identity")
+            effective_context = context
+            detected_encoding = self._probe_result.detected_encoding
+            if (
+                detected_encoding is not None
+                and context.detected_encoding is not None
+                and context.detected_encoding != detected_encoding
+            ):
+                raise _output_error(self.adapter_id, "context_encoding_identity")
+            if detected_encoding is not None and context.detected_encoding is None:
+                try:
+                    effective_context = replace(
+                        context,
+                        detected_encoding=detected_encoding,
+                    )
+                except ValueError as error:
+                    raise _output_error(
+                        self.adapter_id,
+                        "probe_encoding_invalid",
+                        cause=error,
+                    ) from None
             cancellation: asyncio.CancelledError | None = None
             grouped_failure: tuple[_BoundaryError, ...] = ()
             call_failure: ParserError | SecurityPolicyError | None = None
             try:
-                returned: object = self._registration.parser.parse(source, context)
+                returned: object = self._registration.parser.parse(
+                    source,
+                    effective_context,
+                )
             except BaseExceptionGroup as error:
                 if isinstance(error, ExceptionGroup):
                     call_failure = _output_error(
@@ -281,6 +418,12 @@ class SelectedParser:
                 cancellation = _sanitize_cancelled_error(error)
             except SecurityPolicyError as error:
                 call_failure = _detach_security_error(error)
+            except ParserError as error:
+                call_failure = _rebuild_allowed_parser_error(error) or _output_error(
+                    self.adapter_id,
+                    "parse_call_failed",
+                    cause=error,
+                )
             except Exception as error:
                 call_failure = _output_error(
                     self.adapter_id,
@@ -308,6 +451,8 @@ class SelectedParser:
                 source=source,
                 registration=self._registration,
                 max_records=context.max_records,
+                max_physical_objects=context.max_physical_objects,
+                max_batches=context.batch_options.max_batches,
                 release=self._release_stream,
             )
 
@@ -319,6 +464,10 @@ class SelectedParser:
     ) -> ParserError | SecurityPolicyError:
         if isinstance(error, SecurityPolicyError):
             return _detach_security_error(error)
+        if isinstance(error, ParserError):
+            allowed = _rebuild_allowed_parser_error(error)
+            if allowed is not None:
+                return allowed
         return _output_error(
             self.adapter_id,
             "parse_call_failed",
@@ -343,7 +492,10 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
         "_completed",
         "_extraction_id",
         "_fingerprints",
+        "_indexed_refs",
         "_iterator",
+        "_max_batches",
+        "_max_physical_objects",
         "_max_records",
         "_next_in_progress",
         "_next_index",
@@ -353,9 +505,12 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
         "_release",
         "_source",
         "_summaries",
+        "_table_segments",
         "_terminal_seen",
+        "_total_physical_objects",
         "_total_records",
         "_tracking_released",
+        "_tree_segments",
     )
 
     def __init__(
@@ -365,21 +520,29 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
         source: SourceArtifact,
         registration: RegisteredParser,
         max_records: int,
+        max_physical_objects: int,
+        max_batches: int,
         release: _TrackStream,
     ) -> None:
         self._iterator = iterator
         self._source = source
         self._registration = registration
         self._max_records = max_records
+        self._max_physical_objects = max_physical_objects
+        self._max_batches = max_batches
         self._release = release
         self._operation_lock = asyncio.Lock()
         self._next_in_progress = False
         self._next_index = 0
         self._extraction_id: str | None = None
         self._fingerprints: set[str] = set()
+        self._indexed_refs: list[PhysicalSourceRef] = []
         self._physical_refs: set[PhysicalSourceRef] = set()
         self._summaries: list[ExtractedBatchSummary] = []
+        self._table_segments: dict[str, tuple[int, int, bool]] = {}
+        self._tree_segments: dict[str, tuple[int, int, bool, str]] = {}
         self._total_records = 0
+        self._total_physical_objects = 0
         self._terminal_seen = False
         self._tracking_released = False
         self._closing = False
@@ -469,6 +632,12 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
             exhausted = True
         except SecurityPolicyError as error:
             security_failure = _detach_security_error(error)
+        except ParserError as error:
+            iteration_failure = _rebuild_allowed_parser_error(error) or _output_error(
+                self._registration.identity.adapter_id,
+                "parse_iteration_failed",
+                cause=error,
+            )
         except Exception as error:
             iteration_failure = _output_error(
                 self._registration.identity.adapter_id,
@@ -502,9 +671,11 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
             await self._fail_locked("batch_after_terminal")
         if type(item) is not ExtractedBatch:
             await self._fail_locked("batch_type")
+        if self._next_index >= self._max_batches:
+            await self._fail_limit_locked("batch_count", self._max_batches)
         preflight_failure: ParserError | None = None
         try:
-            batch_record_count = self._preflight_record_count(item)
+            batch_counts = self._preflight_counts(item)
         except Exception as error:  # parser DTO является недоверенной boundary
             preflight_failure = _output_error(
                 self._registration.identity.adapter_id,
@@ -513,8 +684,24 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
             )
         if preflight_failure is not None:
             await self._fail_error_locked(preflight_failure)
-        if batch_record_count is None:
-            await self._fail_limit_locked()
+        if batch_counts is _PreflightLimit.RECORDS:
+            await self._fail_limit_locked(
+                _PreflightLimit.RECORDS,
+                self._max_records,
+            )
+        if batch_counts is _PreflightLimit.PHYSICAL_OBJECTS:
+            await self._fail_limit_locked(
+                _PreflightLimit.PHYSICAL_OBJECTS,
+                self._max_physical_objects,
+            )
+        batch_record_count, batch_physical_count = batch_counts
+        if batch_physical_count > (
+            self._max_physical_objects - self._total_physical_objects
+        ):
+            await self._fail_limit_locked(
+                "physical_objects",
+                self._max_physical_objects,
+            )
         validation_failure: ParserError | None = None
         try:
             item = self._revalidate_batch(item)
@@ -524,19 +711,41 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
         if validation_failure is not None:
             await self._raise_after_cleanup(validation_failure)
 
+        if item.schema_version == "1.1.0":
+            next_indexed_ref_count = len(self._indexed_refs) + len(item.indexed_refs)
+            if next_indexed_ref_count > _MAX_INDEXED_REFS:
+                await self._fail_limit_locked("indexed_refs", _MAX_INDEXED_REFS)
+            if set(item.indexed_refs) & set(self._indexed_refs):
+                await self._fail_locked("indexed_refs_duplicate")
+            self._indexed_refs.extend(item.indexed_refs)
+
         summary = item.to_summary()
-        self._physical_refs.update(item.physical_refs())
+        if item.schema_version == "1.1.0":
+            self._physical_refs.update(item.indexed_refs)
+        else:
+            self._physical_refs.update(item.physical_refs())
         self._summaries.append(summary)
         self._next_index += 1
         self._fingerprints.add(item.batch_fingerprint)
         self._total_records += batch_record_count
+        self._total_physical_objects += batch_physical_count
 
         if item.is_last:
             manifest = item.manifest
             if manifest is None or manifest.batches != tuple(self._summaries):
                 await self._fail_locked("manifest_sequence")
-            if not set(manifest.source_index.refs) <= self._physical_refs:
+            if item.schema_version == "1.1.0" and (
+                manifest.source_index.refs != tuple(self._indexed_refs)
+            ):
                 await self._fail_locked("manifest_source_index")
+            if item.schema_version != "1.1.0" and not (
+                set(manifest.source_index.refs) <= self._physical_refs
+            ):
+                await self._fail_locked("manifest_source_index")
+            if any(not closed for _, _, closed in self._table_segments.values()):
+                await self._fail_locked("table_segment_missing_terminal")
+            if any(not closed for _, _, closed, _ in self._tree_segments.values()):
+                await self._fail_locked("tree_segment_missing_terminal")
             self._terminal_seen = True
         return item
 
@@ -546,6 +755,10 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
     ) -> ParserError | SecurityPolicyError:
         if isinstance(error, SecurityPolicyError):
             return _detach_security_error(error)
+        if isinstance(error, ParserError):
+            allowed = _rebuild_allowed_parser_error(error)
+            if allowed is not None:
+                return allowed
         return _output_error(
             self._registration.identity.adapter_id,
             "parse_iteration_failed",
@@ -646,61 +859,73 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
             outcomes,
         ) from None
 
-    def _preflight_record_count(self, item: ExtractedBatch) -> int | None:
-        """Посчитать physical records до дорогой deep-copy, остановившись на limit."""
+    def _preflight_counts(
+        self,
+        item: ExtractedBatch,
+    ) -> tuple[int, int] | _PreflightLimit:
+        """Посчитать logical и physical units до дорогой deep-copy."""
 
-        remaining = self._max_records - self._total_records
-        count = 0
+        remaining_records = self._max_records - self._total_records
+        if item.record_count is not None and item.record_count > remaining_records:
+            return _PreflightLimit.RECORDS
+
+        remaining_physical = self._max_physical_objects - self._total_physical_objects
+        physical_count = 0
 
         def include(quantity: int) -> bool:
-            nonlocal count
-            if quantity > remaining - count:
+            nonlocal physical_count
+            if quantity > remaining_physical - physical_count:
                 return False
-            count += quantity
+            physical_count += quantity
             return True
 
         if not include(len(item.lines)):
-            return None
+            return _PreflightLimit.PHYSICAL_OBJECTS
         if not include(len(item.blocks)):
-            return None
+            return _PreflightLimit.PHYSICAL_OBJECTS
         if not include(len(item.tables)):
-            return None
+            return _PreflightLimit.PHYSICAL_OBJECTS
         if not include(len(item.trees)):
-            return None
+            return _PreflightLimit.PHYSICAL_OBJECTS
         for block in item.blocks:
             if not include(len(block.lines)):
-                return None
+                return _PreflightLimit.PHYSICAL_OBJECTS
         for table in item.tables:
             if not include(len(table.cells)):
-                return None
+                return _PreflightLimit.PHYSICAL_OBJECTS
 
         for line in item.lines:
             for value in line.values:
                 if value.value_id is not None and not include(1):
-                    return None
+                    return _PreflightLimit.PHYSICAL_OBJECTS
         for block in item.blocks:
             for value in block.values:
                 if value.value_id is not None and not include(1):
-                    return None
+                    return _PreflightLimit.PHYSICAL_OBJECTS
             for line in block.lines:
                 for value in line.values:
                     if value.value_id is not None and not include(1):
-                        return None
+                        return _PreflightLimit.PHYSICAL_OBJECTS
         for table in item.tables:
             for cell in table.cells:
                 if cell.value.value_id is not None and not include(1):
-                    return None
+                    return _PreflightLimit.PHYSICAL_OBJECTS
         for node in item.trees:
             if (
                 node.value is not None
                 and node.value.value_id is not None
                 and not include(1)
             ):
-                return None
+                return _PreflightLimit.PHYSICAL_OBJECTS
 
-        if count == 0 and not include(1):
-            return None
-        return count
+        logical_count = (
+            item.record_count
+            if item.record_count is not None
+            else max(physical_count, 1)
+        )
+        if logical_count > remaining_records:
+            return _PreflightLimit.RECORDS
+        return logical_count, physical_count
 
     def _release_tracking(self) -> None:
         if self._tracking_released:
@@ -721,10 +946,99 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
             raise _output_error(identity.adapter_id, "batch_sequence")
         if item.batch_fingerprint in self._fingerprints:
             raise _output_error(identity.adapter_id, "batch_fingerprint_duplicate")
+        if (
+            item.schema_version == "1.1.0"
+            and batch_fingerprint(item) != item.batch_fingerprint
+        ):
+            raise _output_error(identity.adapter_id, "batch_fingerprint_mismatch")
+        if (
+            item.schema_version == "1.1.0"
+            and item.manifest is not None
+            and manifest_fingerprint(item.manifest)
+            != item.manifest.extraction_fingerprint
+        ):
+            raise _output_error(
+                identity.adapter_id,
+                "extraction_fingerprint_mismatch",
+            )
         if self._extraction_id is None:
             self._extraction_id = item.extraction_id
         elif item.extraction_id != self._extraction_id:
             raise _output_error(identity.adapter_id, "extraction_identity")
+        self._validate_table_segments(item)
+        self._validate_tree_segments(item)
+
+    def _validate_table_segments(self, item: ExtractedBatch) -> None:
+        """Проверить непрерывность явно сегментированных physical tables."""
+
+        adapter_id = self._registration.identity.adapter_id
+        for table in item.tables:
+            if table.segment_index is None:
+                continue
+            row_start = table.row_start_index
+            row_end = table.row_end_index
+            is_last = table.is_last_segment
+            if row_start is None or row_end is None or is_last is None:
+                raise _output_error(adapter_id, "table_segment_schema")
+            previous = self._table_segments.get(table.table_id)
+            if previous is None:
+                if table.segment_index != 0:
+                    raise _output_error(adapter_id, "table_segment_sequence")
+            else:
+                next_segment_index, next_row_index, closed = previous
+                if closed:
+                    raise _output_error(adapter_id, "table_segment_after_terminal")
+                if (
+                    table.segment_index != next_segment_index
+                    or row_start != next_row_index
+                ):
+                    raise _output_error(adapter_id, "table_segment_sequence")
+            self._table_segments[table.table_id] = (
+                table.segment_index + 1,
+                row_end + 1,
+                is_last,
+            )
+
+    def _validate_tree_segments(self, item: ExtractedBatch) -> None:
+        """Проверить continuation identity и child ranges physical trees."""
+
+        adapter_id = self._registration.identity.adapter_id
+        for node in item.trees:
+            if node.tree_id is None:
+                continue
+            segment_index = node.segment_index
+            child_start = node.child_start_index
+            child_count = node.child_count
+            is_last = node.is_last_segment
+            node_kind = node.node_kind
+            if (
+                segment_index is None
+                or child_start is None
+                or child_count is None
+                or is_last is None
+                or node_kind is None
+            ):
+                raise _output_error(adapter_id, "tree_segment_schema")
+            previous = self._tree_segments.get(node.tree_id)
+            if previous is None:
+                if segment_index != 0 or child_start != 0:
+                    raise _output_error(adapter_id, "tree_segment_sequence")
+            else:
+                next_segment, next_child, closed, previous_kind = previous
+                if closed:
+                    raise _output_error(adapter_id, "tree_segment_after_terminal")
+                if (
+                    segment_index != next_segment
+                    or child_start != next_child
+                    or str(node_kind) != previous_kind
+                ):
+                    raise _output_error(adapter_id, "tree_segment_sequence")
+            self._tree_segments[node.tree_id] = (
+                segment_index + 1,
+                child_start + child_count,
+                is_last,
+                str(node_kind),
+            )
 
     def _revalidate_batch(self, item: ExtractedBatch) -> ExtractedBatch:
         validation_failure: ParserError | None = None
@@ -759,15 +1073,15 @@ class ValidatedParserStream(AsyncIterator[ExtractedBatch]):
     async def _fail_error_locked(self, error: ParserError) -> Never:
         await self._raise_after_cleanup(error)
 
-    async def _fail_limit_locked(self) -> Never:
+    async def _fail_limit_locked(self, resource: str, limit: int) -> Never:
         await self._raise_after_cleanup(
             SecurityPolicyError(
                 error_code="SECURITY_LIMIT_EXCEEDED",
-                message="Parser output превысил max_records текущего ParseContext.",
+                message="Parser output превысил resource limit текущего ParseContext.",
                 details={
                     "adapter_id": self._registration.identity.adapter_id,
-                    "limit": self._max_records,
-                    "resource": "records",
+                    "limit": limit,
+                    "resource": resource,
                 },
             )
         )

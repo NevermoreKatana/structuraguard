@@ -95,8 +95,10 @@ def _assert_safe_imports_and_environment_access(source_file: Path) -> None:
             )
 
 
-def test_core_has_only_the_allowed_unconditional_dependency() -> None:
-    assert _unconditional_requirements() == frozenset({"pydantic"})
+def test_core_has_only_the_allowed_unconditional_dependencies() -> None:
+    assert _unconditional_requirements() == frozenset(
+        {"charset-normalizer", "pydantic"}
+    )
 
 
 def test_import_does_not_load_web_frameworks_or_settings_package() -> None:

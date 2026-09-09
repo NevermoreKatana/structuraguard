@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Заголовок</w:t></w:r></w:p>
+  <w:tbl><w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>001.20</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t/></w:r></w:p></w:tc></w:tr></w:tbl>
+  <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t xml:space="preserve"> item </w:t><w:tab/><w:t>raw</w:t></w:r></w:p>
+  <w:p><w:r><w:instrText>DDEAUTO secret-canary</w:instrText><w:t>cached result</w:t></w:r></w:p>
+  <w:sectPr/>
+</w:body></w:document>

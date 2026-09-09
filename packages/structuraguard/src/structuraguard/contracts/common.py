@@ -336,6 +336,7 @@ class BuiltInErrorCode(StrEnum):
     MAPPING_PLAN_INVALID = "MAPPING_PLAN_INVALID"
     PROMPT_INJECTION_DETECTED = "PROMPT_INJECTION_DETECTED"
     SECURITY_LIMIT_EXCEEDED = "SECURITY_LIMIT_EXCEEDED"
+    SECURITY_INPUT_REJECTED = "SECURITY_INPUT_REJECTED"
     LLM_DATA_ROUTING_FORBIDDEN = "LLM_DATA_ROUTING_FORBIDDEN"
     LLM_OUTPUT_INVALID = "LLM_OUTPUT_INVALID"
     PARSER_INVALID_ADAPTER = "PARSER_INVALID_ADAPTER"
@@ -345,6 +346,9 @@ class BuiltInErrorCode(StrEnum):
     PARSER_NOT_FOUND = "PARSER_NOT_FOUND"
     PARSER_UNSUPPORTED_FORMAT = "PARSER_UNSUPPORTED_FORMAT"
     PARSER_DEPENDENCY_UNAVAILABLE = "PARSER_DEPENDENCY_UNAVAILABLE"
+    PARSER_MALFORMED_INPUT = "PARSER_MALFORMED_INPUT"
+    PARSER_UNSUPPORTED_FEATURE = "PARSER_UNSUPPORTED_FEATURE"
+    PARSER_ENCODING_UNSUPPORTED = "PARSER_ENCODING_UNSUPPORTED"
     PARSER_PROBE_FAILED = "PARSER_PROBE_FAILED"
     PARSER_PROBE_INVALID = "PARSER_PROBE_INVALID"
     PARSER_FORMAT_CONFLICT = "PARSER_FORMAT_CONFLICT"
@@ -379,6 +383,44 @@ class PhysicalObjectKind(StrEnum):
     TREE_NODE = "tree_node"
     VALUE = "value"
     EXTENSION = "extension"
+
+
+_PHYSICAL_LINE_ID = re.compile(rf"^line-{_GENERATED_ID_SUFFIX}$")
+_PHYSICAL_BLOCK_ID = re.compile(rf"^block-{_GENERATED_ID_SUFFIX}$")
+_PHYSICAL_TABLE_ID = re.compile(rf"^table-{_GENERATED_ID_SUFFIX}$")
+_PHYSICAL_CELL_ID = re.compile(rf"^cell-{_GENERATED_ID_SUFFIX}$")
+_PHYSICAL_TREE_NODE_ID = re.compile(rf"^node-{_GENERATED_ID_SUFFIX}$")
+_PHYSICAL_VALUE_ID = re.compile(rf"^value-{_GENERATED_ID_SUFFIX}$")
+_PHYSICAL_EXTENSION_ID = re.compile(rf"^extension-{_GENERATED_ID_SUFFIX}$")
+
+
+def _validate_generated_extraction_id(extraction_id: str) -> None:
+    if _EXTRACTION_ID.fullmatch(extraction_id) is None:
+        raise ValueError("extraction_id не является parser-generated identifier")
+
+
+def _validate_generated_physical_local_id(
+    kind: PhysicalObjectKind,
+    local_id: str,
+) -> None:
+    if kind is PhysicalObjectKind.LINE:
+        pattern = _PHYSICAL_LINE_ID
+    elif kind is PhysicalObjectKind.BLOCK:
+        pattern = _PHYSICAL_BLOCK_ID
+    elif kind is PhysicalObjectKind.TABLE:
+        pattern = _PHYSICAL_TABLE_ID
+    elif kind is PhysicalObjectKind.CELL:
+        pattern = _PHYSICAL_CELL_ID
+    elif kind is PhysicalObjectKind.TREE_NODE:
+        pattern = _PHYSICAL_TREE_NODE_ID
+    elif kind is PhysicalObjectKind.VALUE:
+        pattern = _PHYSICAL_VALUE_ID
+    elif kind is PhysicalObjectKind.EXTENSION:
+        pattern = _PHYSICAL_EXTENSION_ID
+    else:
+        raise ValueError("Неизвестный physical object kind")
+    if pattern.fullmatch(local_id) is None:
+        raise ValueError("local_id не соответствует physical object kind")
 
 
 class ProducerMetadata(FrozenContract):
@@ -420,25 +462,8 @@ class PhysicalSourceRef(FrozenContract):
 
     @model_validator(mode="after")
     def _validate_generated_identifiers(self) -> Self:
-        if _EXTRACTION_ID.fullmatch(self.extraction_id) is None:
-            raise ValueError("extraction_id не является parser-generated identifier")
-        local_prefix = {
-            PhysicalObjectKind.LINE: "line",
-            PhysicalObjectKind.BLOCK: "block",
-            PhysicalObjectKind.TABLE: "table",
-            PhysicalObjectKind.CELL: "cell",
-            PhysicalObjectKind.TREE_NODE: "node",
-            PhysicalObjectKind.VALUE: "value",
-            PhysicalObjectKind.EXTENSION: "extension",
-        }[self.kind]
-        if (
-            re.fullmatch(
-                rf"{re.escape(local_prefix)}-{_GENERATED_ID_SUFFIX}",
-                self.local_id,
-            )
-            is None
-        ):
-            raise ValueError("local_id не соответствует physical object kind")
+        _validate_generated_extraction_id(self.extraction_id)
+        _validate_generated_physical_local_id(self.kind, self.local_id)
         return self
 
 

@@ -12,15 +12,17 @@ PACKAGE_PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
 SOURCE_PACKAGE = PACKAGE_ROOT / "src" / "structuraguard"
 
 EXPECTED_EXTRAS = frozenset(
-    {"postgres", "pdf", "excel", "office", "litellm", "tika", "all"}
+    {"postgres", "pdf", "excel", "office", "litellm", "tika", "xml", "yaml", "all"}
 )
 EXPECTED_EXTRA_PACKAGES: Mapping[str, frozenset[str]] = {
+    "xml": frozenset({"defusedxml"}),
+    "yaml": frozenset({"pyyaml"}),
     "postgres": frozenset({"sqlalchemy", "asyncpg", "psycopg"}),
     "pdf": frozenset({"pymupdf"}),
-    "excel": frozenset({"openpyxl"}),
-    "office": frozenset({"python-docx"}),
+    "excel": frozenset({"openpyxl", "defusedxml"}),
+    "office": frozenset({"python-docx", "defusedxml"}),
     "litellm": frozenset({"litellm"}),
-    "tika": frozenset({"tika"}),
+    "tika": frozenset({"httpx", "httpcore", "defusedxml"}),
 }
 
 
@@ -67,14 +69,19 @@ def test_package_metadata_declares_one_typed_python_312_distribution() -> None:
     assert (SOURCE_PACKAGE / "py.typed").is_file()
 
 
-def test_base_dependency_is_only_pydantic_v2() -> None:
+def test_base_dependencies_are_exactly_pydantic_and_charset_normalizer() -> None:
     project = _load_package_project()
     dependencies = _as_string_sequence(project.get("dependencies"), "dependencies")
 
-    assert len(dependencies) == 1
-    assert _requirement_name(dependencies[0]) == "pydantic"
-    assert re.search(r">=\s*2(?:\D|$)", dependencies[0])
-    assert re.search(r"<\s*3(?:\D|$)", dependencies[0])
+    assert tuple(map(_requirement_name, dependencies)) == (
+        "pydantic",
+        "charset-normalizer",
+    )
+    requirements = {_requirement_name(item): item for item in dependencies}
+    assert re.search(r">=\s*2(?:\D|$)", requirements["pydantic"])
+    assert re.search(r"<\s*3(?:\D|$)", requirements["pydantic"])
+    assert re.search(r">=\s*3\.4(?:\D|$)", requirements["charset-normalizer"])
+    assert re.search(r"<\s*4(?:\D|$)", requirements["charset-normalizer"])
 
 
 def test_optional_extras_are_exact_and_all_is_the_deduplicated_union() -> None:
@@ -94,6 +101,13 @@ def test_optional_extras_are_exact_and_all_is_the_deduplicated_union() -> None:
     }
     assert len(all_requirements) == len(set(all_requirements))
     assert set(all_requirements) == feature_requirements
+
+
+def test_tika_trace_redaction_backend_version_is_pinned() -> None:
+    project = _load_package_project()
+    extras = _as_mapping(project.get("optional-dependencies"), "optional-dependencies")
+    for extra in ("tika", "all"):
+        assert "httpcore==1.0.9" in _as_string_sequence(extras[extra], extra)
 
 
 def test_installed_distribution_metadata_matches_the_project() -> None:

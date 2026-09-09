@@ -5,7 +5,7 @@ import inspect
 import traceback
 from collections.abc import AsyncIterator, Callable
 from decimal import Decimal
-from typing import cast, get_args, get_origin, get_type_hints
+from typing import Never, cast, get_args, get_origin, get_type_hints
 
 import pytest
 from tests.contract_suites.parser import (
@@ -20,6 +20,8 @@ from tests.fakes.parsers import (
 
 from structuraguard.contracts import (
     ExtractedBatch,
+    ExtractedBlock,
+    ExtractedBlockKind,
     ExtractedDatasetManifest,
     ExtractedLine,
     ExtractedSourceIndex,
@@ -35,7 +37,7 @@ from structuraguard.contracts import (
 from structuraguard.exceptions import ParserError, SecurityPolicyError
 from structuraguard.parsers import ParserRegistry
 from structuraguard.ports import Parser
-from structuraguard.ports.source import ParseContext, ProbeContext
+from structuraguard.ports.source import BatchOptions, ParseContext, ProbeContext
 
 SOURCE_FINGERPRINT = "sha256:" + "a" * 64
 
@@ -250,6 +252,14 @@ class _CancelOnceCloseIterator(AsyncIterator[ExtractedBatch]):
 class _HostileBatchValue:
     def __repr__(self) -> str:
         return "password=DO_NOT_LEAK_BATCH_SCHEMA"
+
+
+class _LengthOnlyHostileLines:
+    def __len__(self) -> int:
+        return 1_000_000
+
+    def __iter__(self) -> Never:
+        raise AssertionError("overflowed nested lines не должны обходиться")
 
 
 def _cancellation_with_context(marker: str) -> asyncio.CancelledError:
@@ -747,6 +757,37 @@ async def test_registry_enforces_record_limit_with_security_error() -> None:
 
 
 @pytest.mark.anyio
+async def test_registry_uses_builtin_resource_name_for_batch_limit() -> None:
+    source = _source()
+    probe_context, parse_context = _contexts()
+    limited_context = ParseContext(
+        reader=parse_context.reader,
+        source_fingerprint=parse_context.source_fingerprint,
+        max_bytes=parse_context.max_bytes,
+        max_records=parse_context.max_records,
+        max_nesting_depth=parse_context.max_nesting_depth,
+        batch_options=BatchOptions(batch_size=1, max_batches=1),
+    )
+    registry = ParserRegistry()
+    registry.register(
+        FakeParser(
+            probe_result=_probe(source),
+            batches=valid_extracted_batches(source, batch_count=2),
+        )
+    )
+
+    async with registry.session() as session:
+        selected = await session.select(source, probe_context)
+        stream = selected.parse(source, limited_context)
+        await anext(stream)
+        with pytest.raises(SecurityPolicyError) as raised:
+            await anext(stream)
+
+    assert raised.value.error_code == "SECURITY_LIMIT_EXCEEDED"
+    assert raised.value.details["resource"] == "batch_count"
+
+
+@pytest.mark.anyio
 async def test_record_limit_rejects_batch_before_deep_copy_or_ref_materialization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -787,6 +828,45 @@ async def test_record_limit_rejects_batch_before_deep_copy_or_ref_materializatio
     assert expensive_calls == []
     assert iterator.closed is True
     assert stream.completed is False
+
+
+@pytest.mark.anyio
+async def test_physical_limit_rejects_nested_collection_before_traversal() -> None:
+    source = _source()
+    probe_context, parse_context = _contexts()
+    limited_context = ParseContext(
+        reader=parse_context.reader,
+        source_fingerprint=parse_context.source_fingerprint,
+        max_bytes=parse_context.max_bytes,
+        max_records=parse_context.max_records,
+        max_nesting_depth=parse_context.max_nesting_depth,
+        max_physical_objects=1,
+    )
+    block = ExtractedBlock(
+        block_id="block-1",
+        kind=ExtractedBlockKind.LINE,
+        order=0,
+        location=LineRangeLocation(
+            source=source.ref,
+            line_start=1,
+            line_end=1,
+        ),
+        text="raw",
+    ).model_copy(update={"lines": _LengthOnlyHostileLines()})
+    forged = valid_extracted_batches(source)[0].model_copy(
+        update={"lines": (), "blocks": (block,)}
+    )
+    registry = ParserRegistry()
+    registry.register(FakeParser(probe_result=_probe(source), batches=(forged,)))
+
+    async with registry.session() as session:
+        selected = await session.select(source, probe_context)
+        stream = selected.parse(source, limited_context)
+        with pytest.raises(SecurityPolicyError) as raised:
+            await anext(stream)
+
+    assert raised.value.error_code == "SECURITY_LIMIT_EXCEEDED"
+    assert raised.value.details["resource"] == "physical_objects"
 
 
 @pytest.mark.anyio

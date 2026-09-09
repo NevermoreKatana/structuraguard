@@ -1,7 +1,8 @@
 # Публичный API StructuraGuard
 
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
-текущей реализации M3. Facade-операции pipeline в эту поставку не входят.
+текущей реализации M4, включая parser groups A–C. Facade-операции pipeline в эту
+поставку не входят.
 
 Целевой API следующих milestone описан в каноническом разделе
 [23. Публичный API SDK][spec-public-api]. Он не считается доступным, пока
@@ -171,9 +172,9 @@ DTO требуют пустой `source_refs`. Успешные validation/load 
 связывает target и полную цепочку source →
 mapping-validation fingerprints.
 
-M2 фиксирует contracts, но не предоставляет concrete parsers, analyzers,
-validators/executors, DB reflection/load, LLM providers, staging или audit
-backends.
+M2 фиксирует contracts. Concrete TXT/LOG/Markdown, CSV/TSV и JSON-family parsers
+описаны ниже; analyzers, validators/executors, DB reflection/load, LLM providers,
+staging и audit backends по-прежнему не входят в этот срез.
 
 `ValidatedParsePlan` и `ValidatedMappingPlan` сохраняют evidence успешной
 проверки, но не являются неподделываемыми полномочиями. Будущий executor или DB
@@ -413,8 +414,350 @@ parser.sample sample-plugin vendor.sample SampleParser
 Descriptor в M3 не исполняется: до появления sandbox runner его activation
 через `registry.activate_plugin(adapter_id)` завершается
 `SECURITY_SANDBOX_REQUIRED` без in-process fallback. Неизвестный ID даёт
-`PARSER_NOT_FOUND`. Реальные format parsers, semantic analyzer и orchestrator в
-M3 отсутствуют.
+`PARSER_NOT_FOUND`. В самом M3 format parsers, semantic analyzer и orchestrator
+отсутствовали; M4 adapters ниже не меняют plugin activation policy.
+
+## Technical parsers M4 {#m4-technical-parsers}
+
+### Копируемый пример физического извлечения {#m4-extraction-copyable-example}
+
+Требуется установленный `structuraguard` без extras. Пример читает две строки
+из небольшого неизменяемого snapshot, явно регистрирует TXT adapter и проверяет
+весь результат. Сеть, LLM и БД не используются.
+
+<!-- example:m04-extraction:start -->
+```python
+import asyncio
+import hashlib
+
+from structuraguard.contracts import SourceArtifact
+from structuraguard.parsers import ParserRegistry
+from structuraguard.parsers.builtin import PlainTextParser, TextParserLimits
+from structuraguard.ports.source import BatchOptions, ParseContext, ProbeContext
+
+
+class MemoryReader:
+    def __init__(self, content: bytes) -> None:
+        self._content = content
+        self.source_fingerprint = "sha256:" + hashlib.sha256(content).hexdigest()
+
+    async def read(self, *, offset: int, size: int) -> bytes:
+        return self._content[offset : offset + size]
+
+
+async def main() -> None:
+    content = "Первая строка\nВторая строка\n".encode("utf-8")
+    reader = MemoryReader(content)
+    source = SourceArtifact(
+        artifact_id="demo-text",
+        display_name="demo.txt",
+        media_type="text/plain",
+        size_bytes=len(content),
+        source_fingerprint=reader.source_fingerprint,
+    )
+    registry = ParserRegistry()
+    registry.register(PlainTextParser(limits=TextParserLimits(max_line_chars=100)))
+    context = ParseContext(
+        reader=reader,
+        source_fingerprint=reader.source_fingerprint,
+        max_bytes=1024,
+        max_records=10,
+        max_nesting_depth=8,
+        batch_options=BatchOptions(batch_size=1, max_batches=10),
+    )
+    async with registry.session() as session:
+        selected = await session.select(
+            source,
+            ProbeContext(
+                reader=reader,
+                source_fingerprint=reader.source_fingerprint,
+                max_probe_bytes=1024,
+            ),
+        )
+        batches = [batch async for batch in selected.parse(source, context)]
+        manifest = batches[-1].manifest
+        assert manifest is not None
+        manifest.validate_batches(batches)
+        lines = [line for batch in batches for line in batch.lines]
+        assert [line.text for line in lines] == ["Первая строка", "Вторая строка"]
+        assert [line.location.line_start for line in lines] == [1, 2]
+        print(selected.adapter_id)
+        print(f"{len(batches)} batches, {len(lines)} lines")
+
+
+asyncio.run(main())
+```
+<!-- example:m04-extraction:end -->
+
+Ожидаемый вывод:
+
+```text
+builtin.text
+2 batches, 2 lines
+```
+
+`MemoryReader` и сбор всего результата в list подходят только для этого малого
+примера. Для большого источника caller предоставляет `SourceReader` над
+неизменяемым snapshot и обрабатывает batches по одному. До EOF и успешных
+проверок terminal manifest ранее полученные batches остаются предварительными:
+ошибка или cancellation не разрешают считать извлечение завершённым. Сохранённую
+последовательность можно повторно читать по одному batch в `validate_batches()`;
+этот метод не требует list и не удерживает весь raw output. M4 не предоставляет
+готовый staging backend или ingest executor.
+
+`probe(source, context)` возвращает bounded `ProbeResult`, а не гарантию валидности
+всего файла. `parse(source, context)` возвращает async iterator физических
+`ExtractedBatch`; ошибки чтения возникают при итерации. Контексты и limits
+конечны, неправильная конфигурация dataclass отклоняется `ValueError`.
+При досрочном выходе закрывайте registry session: она закрывает свои streams.
+`asyncio.CancelledError` не преобразуется в успешный пустой результат.
+
+| Исключение | Machine-readable code и смысл |
+| --- | --- |
+| `ParserError` | `PARSER_UNSUPPORTED_FORMAT` — selection не нашёл adapter; `PARSER_UNSUPPORTED_FEATURE` — возможность или dialect не поддержаны |
+| `ParserError` | `PARSER_MALFORMED_INPUT`, `PARSER_ENCODING_UNSUPPORTED` — некорректный формат или кодировка; координаты зависят от формата, raw fragments не возвращаются |
+| `ParserError` | `PARSER_DEPENDENCY_UNAVAILABLE`, `PARSER_NO_TEXT_LAYER`, `PARSER_TIKA_UNAVAILABLE` — отсутствует extra, текстовый слой или доступный endpoint |
+| `ParserError` | `PROCESSING_TIMEOUT` — истёк deadline document/Tika adapter; `PARSER_OUTPUT_INVALID` — нарушен output contract или аварийно завершился worker |
+| `SecurityPolicyError` | `SECURITY_LIMIT_EXCEEDED`, `SECURITY_INPUT_REJECTED`, `SECURITY_SANDBOX_REQUIRED` — превышен бюджет, запрещён ввод или недоступна требуемая изоляция |
+
+Raw values могут содержать PII, инструкции и вредоносную разметку. Парсеры не
+выполняют их, не вызывают LLM/БД и не создают окончательный `ParsePlan`. Извлечение
+не является DLP-проверкой или HTML sanitization: не логируйте raw batches и не
+выводите raw поля через `innerHTML`. Общий wall-clock deadline для всех A–D пока
+не реализован; наличие finite limits и cancellation не означает hard timeout.
+
+Это реализованный scope, а не полная приёмка [M4 ТЗ][spec-m4].
+[Аудит M4](plans/M04_acceptance_audit.md) оставляет частично подтверждёнными
+AC-06/07/11/12: измерения peak resources, исчерпывающие N±1 boundaries,
+отдельное all-extras окружение и реальный Tika deployment. Требование streaming
+определено в [NFR-006][spec-nfr-006]; форматные ограничения приведены ниже.
+
+## Built-in text parsers M4-A
+
+TXT, LOG и Markdown adapters регистрируются явно. Импорт
+`structuraguard.parsers` не создаёт их и не меняет registry:
+
+```python
+from structuraguard.parsers import ParserRegistry
+from structuraguard.parsers.builtin import builtin_text_parsers
+
+registry = ParserRegistry()
+registry.register_many(builtin_text_parsers())
+```
+
+Factory каждый раз возвращает новые `PlainTextParser`, `LogParser` и
+`MarkdownParser` с IDs `builtin.text`, `builtin.log` и `builtin.markdown`.
+Пределы задаются immutable `TextParserLimits`, `LogParserLimits` и
+`MarkdownParserLimits`; размер batch — через `ParseContext.batch_options`.
+Hard caps: `batch_size <= 1_000_000`, `max_batches <= 10_000` и
+`max_physical_objects <= 10_000_000`.
+После selection runtime переносит проверенный `detected_encoding` в immutable
+`ParseContext`, поэтому parse не зависит от размера short read и не хранит
+решение в состоянии adapter.
+
+Probe сначала учитывает BOM и strict UTF-8, затем MAY применить bounded
+`charset-normalizer`. Результат содержит `detected_encoding`, confidence и
+warnings `PARSER_ENCODING_HEURISTIC`/`PARSER_ENCODING_LOW_CONFIDENCE`.
+Malformed input не декодируется с replacement characters и даёт typed
+`PARSER_ENCODING_UNSUPPORTED` либо `PARSER_MALFORMED_INPUT`.
+Stateful escape codecs (`ISO-2022`, `HZ`) отклоняются как unsupported: их
+zero-output shift sequences сделали бы terminal batching зависимым от границ
+чтения.
+
+`PlainTextParser` возвращает ordered physical lines. `MarkdownParser` добавляет
+heading, paragraph, list, blank и inert fenced-code blocks. `LogParser`
+сохраняет lines и event blocks; только фиксированные ISO timestamp/level,
+Apache combined и bounded key-value recognizers создают raw technical hints.
+Одна похожая или неизвестная строка не подтверждает LOG, а JSON-per-line не
+перехватывается у JSONL adapter. Ни один adapter не выполняет code,
+HTML, links или embedded commands и не формирует `ParsePlan`.
+
+Все три parser используют line-based provenance. `line_start`/`line_end`
+нумеруются с единицы, capture columns — zero-based и end-exclusive, а исходный
+line terminator хранится в bounded metadata. Новые adapters создают physical
+wire schema `1.1.0`; совместимость описана в
+[ADR 0004](adr/0004-lossless-physical-extraction.md).
+Terminal manifest включает producer identity, fingerprint effective parser
+limits/batching и independently verifiable canonical batch/run fingerprints.
+Выбранный `ParseContext.detected_encoding` также входит в fingerprint настроек
+группы A: разные декодирования одного snapshot не разделяют `extraction_id`.
+После исправления M4 identities пересчитываются; не смешивайте batches,
+полученные до и после этой правки незавершённого milestone.
+Group A adapters помещают в `indexed_refs` deterministic prefix реальных
+line/block/value references с общим cap 10 000; terminal `source_index` точно
+равен их progressive последовательности и пригоден для bounded physical sample.
+
+## Built-in delimited parser M4-B
+
+CSV и TSV обслуживает один узкий format-family adapter
+`DelimitedTextParser`. Он не является универсальным parser и регистрируется
+отдельно от Group A:
+
+```python
+from structuraguard.parsers import ParserRegistry
+from structuraguard.parsers.builtin import (
+    builtin_delimited_parsers,
+    builtin_text_parsers,
+)
+
+registry = ParserRegistry()
+registry.register_many((*builtin_delimited_parsers(), *builtin_text_parsers()))
+```
+
+`builtin_delimited_parsers()` каждый раз возвращает новый instance-local
+adapter `builtin.delimited`. Существующий `builtin_text_parsers()` по-прежнему
+возвращает только Group A и не меняет compatibility contract.
+
+Bounded probe определяет delimiter, quote и escape по повторяемой
+многоколоночной структуре. TAB даёт `format_id="tsv"`, остальные поддержанные
+delimiter — `format_id="csv"`. Одноколоночный или неустойчивый sample не
+подтверждает delimited format. Равноправные правдоподобные dialects отклоняются
+fail-closed как `PARSER_UNSUPPORTED_FEATURE` с
+`feature="ambiguous_dialect"`, поэтому spoofed MIME или extension не заставляет
+adapter выбрать dialect случайно.
+
+Escape candidate считается подтверждённым только когда меняет physical
+tokenization (`delimiter`, quote или newline). Пара одинаковых escape characters
+сама по себе не включает destructive unescaping: auto-detection предпочитает
+`escape_char=None` и сохраняет оба characters. Exact dialect override применяет
+явно выбранную escape policy.
+
+Caller может ограничить candidate vocabulary либо задать полный immutable
+dialect override:
+
+```python
+from structuraguard.parsers.builtin import (
+    DelimitedDetectionOptions,
+    DelimitedDialect,
+    DelimitedTextParser,
+)
+
+parser = DelimitedTextParser(
+    detection_options=DelimitedDetectionOptions(
+        dialect_override=DelimitedDialect(
+            delimiter=";",
+            quote_char='"',
+            escape_char="\\",
+        )
+    )
+)
+```
+
+Override входит в `parser_options_fingerprint`; process-global
+`csv.field_size_limit` и locale не изменяются. Header не становится schema:
+adapter сохраняет первую подходящую строку только как bounded
+`header_candidate_row`/`header_candidate_confidence` metadata. Duplicate header
+values не переименовываются, type/locale conversion, business normalization и
+semantic field naming не выполняются.
+
+Каждая существующая physical cell становится `ExtractedCell` со строковым
+`raw_value`. Dialect syntax снимает только quotes/escape; пробелы, ведущие нули,
+locale-looking numbers, duplicate values и formula-like prefixes `=`, `+`, `-`,
+`@` остаются неизменёнными и не исполняются. Cell metadata различает quoted,
+escaped и explicit empty values. В ragged row отсутствующая cell представлена
+отсутствием координаты, а не синтетическим `null`; blank row учитывается в
+`record_count` и table row range, даже если не содержит cells.
+
+Одна physical table передаётся последовательностью `ExtractedTable` segments с
+одинаковым `table_id`. `segment_index`, inclusive `row_start_index`/
+`row_end_index` и `is_last_segment` делают продолжение проверяемым. Batch boundary
+проходит только между complete logical rows; quoted newline может пересекать
+границы чтения, но не разрезает row. Tokenizer обрабатывает bounded slices и
+проверяет cancellation во время dialect probe и между batches без полной
+загрузки large source. Помимо target `BatchOptions.batch_size`, adapter раньше
+закрывает segment по `max_batch_cells` или `max_batch_chars`; одна logical row
+всегда помещается в эти пределы за счёт проверок конфигурации. Char budget
+считает decoded record syntax и исходный `LF`/`CRLF`, включая blank rows.
+Каждый batch содержит bounded deterministic prefix реальных table/cell/value
+references для `source_index`.
+
+`TabularCellLocation` хранит zero-based logical `row_index` и `column_index`.
+Malformed diagnostics дополнительно возвращают безопасные one-based
+`record_number` и physical `line_number`, не включая raw row. Cell-level byte
+offset или lexical span исходного quoted token пока не является публичной частью
+schema `1.1.0`; downstream не должен выводить его из длины decoded value.
+Расширение lexical/source-span provenance отложено до отдельного решения о
+версии physical schema.
+
+`DelimitedParserLimits` задаёт `max_columns`, `max_field_size`
+(в decoded Unicode code points), `max_record_chars`, `max_batch_cells`,
+`max_batch_chars`, bounded header/dialect probe и унаследованные text limits.
+Defaults для delimited-specific limits: 500 columns, 1 000 000 field chars,
+4 000 000 record chars, 4096 cells и 8 MiB decoded chars на batch. Hard ceilings:
+10 000 columns/cells, 16 MiB на field, 32 MiB на record и 32 MiB + CRLF на
+batch; header probe ограничен 1024 rows, Cartesian dialect set — 128 candidates.
+`ParseContext` отдельно задаёт `max_bytes`, `max_records`, batching и
+`max_physical_objects`. Overflow даёт `SECURITY_LIMIT_EXCEEDED`; malformed quote
+или escape — `PARSER_MALFORMED_INPUT`; недопустимая кодировка —
+`PARSER_ENCODING_UNSUPPORTED`. В errors сохраняются только allowlisted reason и
+координаты, без fragment исходной строки.
+
+Group B использует собственный instance-local incremental tokenizer без
+внешнего parser runtime и общий bounded encoding helper. Runtime dependencies
+не изменились; Polars не является обязательной или optional dependency этого
+adapter.
+
+## Built-in JSON parsers M4-C
+
+JSON document и line-delimited JSON регистрируются двумя независимыми adapters:
+
+```python
+from structuraguard.parsers import ParserRegistry
+from structuraguard.parsers.builtin import (
+    builtin_delimited_parsers,
+    builtin_json_parsers,
+    builtin_text_parsers,
+)
+
+registry = ParserRegistry()
+registry.register_many(
+    (
+        *builtin_text_parsers(),
+        *builtin_delimited_parsers(),
+        *builtin_json_parsers(),
+    )
+)
+```
+
+`builtin_json_parsers()` каждый раз возвращает новые `JsonDocumentParser` и
+`JsonLinesParser` с IDs `builtin.json` и `builtin.json-lines`. JSONL и NDJSON —
+aliases одного physical format с `format_id="jsonl"`; отдельного NDJSON adapter
+нет. Регистрация остаётся явной и instance-local.
+
+`JsonDocumentParser` принимает один strict JSON document: object, array либо
+top-level scalar. `JsonLinesParser` потоково читает independently complete JSON
+records по физическим строкам; для content-only autodetection нужны как минимум
+две записи. Поэтому один complete value с suffix `.jsonl` остаётся JSON document,
+а пустой source с JSON MIME или extension — пустым TXT. MIME и extension не
+переопределяют content; конфликтующие hints добавляют стандартные warnings.
+JSON family принимает только strict UTF-8 либо UTF-8 с BOM и не вызывает
+encoding auto-detection; иной codec и malformed bytes отклоняются typed error.
+В probe ошибка UTF-8 без подтверждённого JSON prefix означает неприменимость
+JSON adapter: она не блокирует TXT/CSV/XML с другой кодировкой. Для JSON prefix
+ошибка остаётся `PARSER_ENCODING_UNSUPPORTED`; strict policy самого parse не меняется.
+Whitespace-only JSONL lines пропускаются как records, но сохраняют место в
+one-based physical line numbering.
+
+Оба adapters возвращают ordered `ExtractedTreeNode` без destructive flatten.
+Object members, array items, empty containers, duplicate и empty keys, nested и
+повторяющиеся collections сохраняются как физическая структура. `raw_name`
+содержит исходный JSON key, а число — исходный lexical token без числового
+преобразования; technical type hint хранится отдельно. Parser не назначает
+бизнес-сущности или semantic field names. Provenance использует RFC 6901 JSON
+Pointer; duplicate members различаются через `occurrence_path`, а JSONL records
+дополнительно сохраняют record index и physical line coordinates.
+
+Batch boundary проходит только между complete JSON subtrees или JSONL records.
+Top-level array использует общий `tree_id` и continuation fields
+`segment_index`, `child_start_index`, `child_count`, `is_last_segment`, поэтому
+его элементы не дублируются и не пропускаются между batches.
+`JsonParserLimits` ограничивает nesting, nodes/key count, scalar и record size;
+`ParseContext` независимо задаёт bytes, records, physical objects и batching.
+Malformed JSON возвращает `PARSER_MALFORMED_INPUT`, а JSONL diagnostics содержит
+one-based `line_number` без raw fragment. Переполнение лимита возвращает
+`SECURITY_LIMIT_EXCEEDED`. Content внутри string/key остаётся inert и никогда не
+исполняется. Общий bounded tokenizer не строит full-DOM и не добавляет новую
+runtime dependency.
 
 ## SDKConfig
 
@@ -470,7 +813,7 @@ SYNC_API_IN_ASYNC_CONTEXT
 ## Исключения
 
 Все публичные категории наследуют `StructuraGuardError`. Наличие категорийных
-classes не означает, что parser, DB inspector или loader уже реализованы.
+classes не означает, что реализованы все parser groups, DB inspector или loader.
 
 Публичные поля базовой ошибки:
 
@@ -494,7 +837,9 @@ Registry M3 использует `ParserError` со стабильными codes
 `PARSER_INVALID_ADAPTER`, `PARSER_DUPLICATE_REGISTRATION`,
 `PARSER_REGISTRY_FROZEN`, `PARSER_SESSION_CLOSED`, `PARSER_NOT_FOUND`,
 `PARSER_UNSUPPORTED_FORMAT`, `PARSER_DEPENDENCY_UNAVAILABLE`,
-`PARSER_PROBE_FAILED`, `PARSER_PROBE_INVALID`, `PARSER_FORMAT_CONFLICT`,
+`PARSER_MALFORMED_INPUT`, `PARSER_UNSUPPORTED_FEATURE`,
+`PARSER_ENCODING_UNSUPPORTED`, `PARSER_PROBE_FAILED`, `PARSER_PROBE_INVALID`,
+`PARSER_FORMAT_CONFLICT`,
 `PARSER_PLUGIN_METADATA_INVALID`, `PARSER_PLUGIN_DISCOVERY_FAILED` и
 `PARSER_OUTPUT_INVALID`. Невозможность безопасно активировать untrusted
 descriptor возвращает `SecurityPolicyError` с `SECURITY_SANDBOX_REQUIRED`.
@@ -547,16 +892,172 @@ Redaction является defense-in-depth, а не универсальным 
 перечисляют distributions и entry points. Metadata discovery является I/O и
 начинается только из явного `discover_plugins()`.
 
-## Зависимости и ограничения M3
+## Зависимости и ограничения текущего среза
+
+### XML / HTML / YAML
+
+```python
+from structuraguard.parsers import ParserRegistry
+from structuraguard.parsers.builtin import (
+    XmlParser, XmlParserLimits, HtmlParser, YamlParser, YamlParserLimits,
+    html_safe_json,
+)
+
+registry = ParserRegistry()
+registry.register(XmlParser(limits=XmlParserLimits(max_depth=32, max_nodes=100_000)))
+registry.register(HtmlParser())
+registry.register(YamlParser(limits=YamlParserLimits(max_aliases=0)))
+```
+
+Установите `structuraguard[xml,yaml]`, если нужны XML/YAML adapters.
+`builtin_markup_parsers()` возвращает новые независимые instances для явной
+регистрации. Optional backends не импортируются при factory/import пакета.
+
+XML сохраняет namespace-aware tree/XPath; DTD/entities запрещены. HTML выдаёт
+source-event DOM, headings/text/list blocks и физические tables/cells, не
+выполняет active content и не загружает resources. `html_safe_json(batch)`
+позволяет сериализовать raw payload без HTML delimiters; raw fields нельзя
+передавать в `innerHTML`. YAML сохраняет hierarchy, duplicate/complex keys,
+lexemes, safe tags и marks. Aliases — ограниченные ссылки, без expansion.
+
+`XmlParserLimits`, `HtmlParserLimits`, `YamlParserLimits` конфигурируют finite
+depth/node/text/token/subtree/batch limits. Дополнительно действуют bytes,
+records, physical object и batch limits `ParseContext`. Неразрезаемый большой
+subtree/document отклоняется с `SECURITY_LIMIT_EXCEEDED`. DTD/unsafe YAML tag —
+`SECURITY_INPUT_REJECTED`; malformed input — `PARSER_MALFORMED_INPUT` с physical
+line number, неизвестный XML codec/невалидный UTF-8 — typed encoding error.
+HTML/YAML имеют явную strict UTF-8 policy.
+
+HTML adapter явно сохраняет marked-section grammar: завершённая section с
+неизвестным именем, например &lt;![bogus]&gt;, даёт `PARSER_MALFORMED_INPUT`
+с physical line number, а поддержанные CDATA и
+conditional sections остаются inert declarations. Это не зависит от нового
+HTML5 dispatch stdlib, превращающего неизвестную section в bogus comment.
+Такой же текст внутри attribute, comment или script/style не считается section
+и сохраняется как raw data; JavaScript и conditional content не исполняются.
+
+YAML probe ищет структурные признаки в первой значимой строке, пропуская
+комментарии; двоеточие в последующей CSV cell не подтверждает YAML. JSONL с
+разными типами корневых records остаётся у JSON adapters. Ошибки подтверждённого
+YAML и запрет unsafe tags не подменяются успешным TXT fallback.
+
+XML batching идёт по direct-child subtrees, HTML — top-level DOM subtrees,
+YAML — documents; у XML/HTML есть continuation root. CSS coordinates относятся
+к исходному event DOM, а не к исправленному browser DOM; attribute position —
+enclosing tag плюс occurrence. YAML marks не включают comments/byte offsets.
+Полные гарантии и ограничения: [ADR 0005](adr/0005-safe-markup-extraction.md).
+
+### Встроенные document adapters (M4-E)
+
+`structuraguard.parsers.builtin` экспортирует независимые `XlsxParser`,
+`PdfParser`, `DocxParser`, соответствующие `*ParserLimits` и factory
+`builtin_document_parsers()`. Регистрация остаётся явной. Установка:
+`pip install 'structuraguard[excel,pdf,office]'`.
+
+XLSX сохраняет worksheet tables/row segments/cells, merged ranges, точные имена
+листов, raw cached values и отдельные formula sources. DOCX сохраняет mixed
+block/table order, paragraphs/headings/lists, nested cells, runs и properties.
+DOCX `noBreakHyphen`/`softHyphen` сохраняются как U+2011/U+00AD с run provenance.
+Неизвестные содержательные run elements и неподдерживаемые контейнеры внутри
+table/row/cell, включая content controls, дают `PARSER_UNSUPPORTED_FEATURE`,
+а не успешный результат с потерянным текстом.
+PDF извлекает text pages/blocks/lines, геометрические table candidates и bbox;
+документ без текста возвращает `PARSER_NO_TEXT_LAYER`. OCR отсутствует.
+
+Все adapters используют bounded subprocess/snapshot с hard deadline и cleanup.
+`batch_size`: XLSX rows, PDF pages, DOCX body blocks. Limits задаются при создании
+адаптера; действуют также ограничения `ParseContext`. `strict_mode=True` требует
+будущий sandbox runner и сейчас возвращает `SECURITY_SANDBOX_REQUIRED`.
+Worker поддерживает Linux/macOS; это не security sandbox. Возможен отказ на
+active/unsupported documents и oversized неделимом XML part/page/table.
+Worker limit error сохраняет allowlisted `resource` и числовой `limit` без raw
+diagnostics. Crash, повреждённый transport и неожиданный backend defect дают
+`PARSER_OUTPUT_INVALID`; известный malformed PDF остаётся `PARSER_MALFORMED_INPUT`.
+Raw output не формирует `ParsePlan`, не назначает сущности и не безопасен для
+`innerHTML` без escaping. Политики, точность provenance, memory caveats и
+лицензирование PDF backend: [ADR 0006](adr/0006-bounded-document-adapters.md).
+
+### Optional Tika fallback (M4-F)
+
+`pip install 'structuraguard[tika]'` подключает HTTPX и defusedxml, но не включает
+adapter и не устанавливает/запускает Tika/JVM. Публичные классы находятся только
+в `structuraguard.parsers.tika`: `TikaParserAdapter`, `TikaConfig`,
+`TikaParserLimits`, `TikaEgressApproval`. Default factories не меняются.
+
+Extra также закрепляет `httpcore==1.0.9` для request-local redaction transport logs.
+Недоверенные response headers/reason/errors не попадают в HTTPX/httpcore logs;
+глобальная logging configuration caller не меняется. Перед upload проверяются
+SHA и сигнатура одного snapshot; изменение формата после probe не разрешает egress.
+
+Caller создаёт отдельный fallback-only `ParserRegistry` после
+`PARSER_UNSUPPORTED_FORMAT` core selection. Security, malformed и conflict errors
+не разрешают fallback. Начальный allowlist ограничен RTF и PostScript;
+probe читает до 16 байт локально, без HTTP. Копируемая функция конфигурации ниже
+не выполняет upload. `approval` поступает от реальной DLP-проверки caller;
+функция не выдаёт его сама. `server_version` — версия закреплённого deployment,
+заявленная caller: adapter записывает её в provenance, но не проверяет версию
+сервера по сети.
+
+<!-- example:m04-tika-config:start -->
+```python
+from structuraguard.parsers.tika import (
+    TikaConfig,
+    TikaEgressApproval,
+    TikaParserAdapter,
+    TikaParserLimits,
+)
+
+
+def build_tika_fallback(
+    *, endpoint: str, server_version: str, approval: TikaEgressApproval
+) -> TikaParserAdapter:
+    return TikaParserAdapter(
+        config=TikaConfig(
+            enabled=True,
+            endpoint=endpoint,
+            allowed_media_types=frozenset({"application/rtf"}),
+            expected_server_version=server_version,
+        ),
+        approval=approval,
+        limits=TikaParserLimits(max_request_bytes=8 * 1024 * 1024, timeout_seconds=30),
+    )
+```
+<!-- example:m04-tika-config:end -->
+
+`TikaEgressApproval` разрешает только проверенный `PUBLIC` snapshot:
+`secrets_checked=True`, `contains_secrets=False`. Без approval upload запрещён.
+До HTTP adapter проверяет размер, SHA-256 и известные credential markers всего
+snapshot. Этот дополнительный scanner **не заменяет DLP caller**, особенно для
+RTF escapes и обфускации. Filenames/metadata/credentials/environment не передаются;
+redirects, response compression, DTD/entities и неожиданные content types запрещены.
+HTTPS обязателен вне numeric loopback; endpoint не поддерживает auth/query.
+
+Результат — `ExtractedBatch` с физическим XHTML tree. Версионированная
+`ExtensionLocation` указывает XPath в ответе Tika, **не координаты исходного файла**.
+Raw values сохраняются; consumer экранирует их при HTML rendering. Bounded response
+проверяется до первой выдачи; действуют transport/XML limits, batching и cancellation.
+Ошибки: `PARSER_TIKA_UNAVAILABLE`, `PROCESSING_TIMEOUT`, `PARSER_MALFORMED_INPUT`,
+а также существующие dependency/security errors.
+
+Network/container isolation, отключение OCR/active content на сервере, server
+resource limits и secret review обеспечивает вызывающий проект. Client timeout
+не гарантирует остановку удалённого job. Default tests используют fake server,
+не внешний Tika; фактическая совместимость deployment требует отдельной проверки.
+Подробности и изменение прежнего F/M12 gate: [ADR 0007](adr/0007-opt-in-tika-egress.md).
+
+### Runtime dependencies
 
 - Требуется Python 3.12 или новее.
-- Единственная unconditional runtime dependency — Pydantic v2.
+- Unconditional runtime dependencies — Pydantic v2 и
+  `charset-normalizer>=3.4,<4`.
 - Web frameworks отсутствуют в core dependencies.
-- Extras `postgres`, `pdf`, `excel`, `office`, `litellm`, `tika` и `all`
-  резервируют dependency bundles. Установка extra не добавляет готовый adapter.
-- Registry и parser boundary реализованы, но concrete format parsers, semantic
-  analyzer/executor, DB inspection/load, validation pipeline и LLM operations
-  отсутствуют.
+- Extras `xml`, `yaml`, `pdf`, `excel`, `office`, `tika` подключают backends реализованных
+  adapters; `all` включает их без активации. `postgres`, `litellm` пока
+  резервируют dependency bundles.
+- Registry, parser boundary и группы TXT/LOG/Markdown, CSV/TSV и
+  JSON/JSONL/NDJSON, XML/HTML/YAML и XLSX/PDF/DOCX реализованы, Tika доступен только
+  opt-in. Semantic analyzer/executor, DB inspection/load,
+  validation pipeline и LLM operations отсутствуют.
 - M3 не реализует orchestrator и не имеет успешного ingest-сценария.
 - Terminal manifests сами проверяют terminal batch. Для всей последовательности
   caller обязан один раз передать ordered iterable в `validate_batches()`:
@@ -580,3 +1081,5 @@ evidence scaffold находится в [плане M1](plans/M01_sdk_scaffold.m
 [spec-public-api]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#23-публичный-api-sdk
 [spec-m2]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m2-доменные-модели-и-contracts
 [spec-m3]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m3-parser-registry
+[spec-m4]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m4-technical-parsers
+[spec-nfr-006]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#nfr-006-streaming

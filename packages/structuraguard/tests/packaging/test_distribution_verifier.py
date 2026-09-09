@@ -29,7 +29,7 @@ locked_registry_version = cast(
 )
 runtime_closure = cast(
     frozenset[str],
-    VERIFIER_NAMESPACE["_PYDANTIC_RUNTIME_CLOSURE"],
+    VERIFIER_NAMESPACE["_CORE_RUNTIME_CLOSURE"],
 )
 verify_installed_wheel_function = cast(
     FunctionType,

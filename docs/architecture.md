@@ -46,6 +46,15 @@ domain + contracts + ports
 parser / database / LLM / validation / security / store adapters
 ```
 
+Реализованные physical adapters M4, их optional extras и ограничения описаны в
+[публичном API](public-api.md#m4-technical-parsers). Долгоживущие уточнения
+physical model, markup/document isolation и Tika egress закреплены в
+[ADR 0004](adr/0004-lossless-physical-extraction.md),
+[ADR 0005](adr/0005-safe-markup-extraction.md),
+[ADR 0006](adr/0006-bounded-document-adapters.md) и
+[ADR 0007](adr/0007-opt-in-tika-egress.md). Эти реализации не означают готовность
+описанного ниже полного application pipeline.
+
 ### Package layout M3
 
 Корень репозитория является виртуальным `uv` workspace и не создаёт второй

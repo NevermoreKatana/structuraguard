@@ -56,7 +56,28 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/domain/lineage.py",
         "structuraguard/exceptions.py",
         "structuraguard/parsers/__init__.py",
+        "structuraguard/parsers/_hashing.py",
         "structuraguard/parsers/_registration.py",
+        "structuraguard/parsers/builtin/__init__.py",
+        "structuraguard/parsers/builtin/_common.py",
+        "structuraguard/parsers/builtin/_json.py",
+        "structuraguard/parsers/builtin/_markup.py",
+        "structuraguard/parsers/tika.py",
+        "structuraguard/parsers/_tika_http.py",
+        "structuraguard/parsers/builtin/_documents.py",
+        "structuraguard/parsers/builtin/_document_worker.py",
+        "structuraguard/parsers/builtin/xlsx.py",
+        "structuraguard/parsers/builtin/pdf.py",
+        "structuraguard/parsers/builtin/docx.py",
+        "structuraguard/parsers/builtin/xml.py",
+        "structuraguard/parsers/builtin/html.py",
+        "structuraguard/parsers/builtin/yaml.py",
+        "structuraguard/parsers/builtin/delimited.py",
+        "structuraguard/parsers/builtin/json_document.py",
+        "structuraguard/parsers/builtin/json_lines.py",
+        "structuraguard/parsers/builtin/log.py",
+        "structuraguard/parsers/builtin/markdown.py",
+        "structuraguard/parsers/builtin/text.py",
         "structuraguard/parsers/discovery.py",
         "structuraguard/parsers/execution.py",
         "structuraguard/parsers/registry.py",
@@ -172,6 +193,8 @@ _CONTRACT_EXPORTS = frozenset(
         "PARSER_ENTRY_POINT_GROUP",
         "ParserDiscoveryPolicy",
         "ParserPluginDescriptor",
+        "PhysicalMetadataEntry",
+        "PhysicalNodeKind",
         "PhysicalObjectKind",
         "PhysicalSample",
         "PhysicalSourceRef",
@@ -265,13 +288,50 @@ _PARSER_EXPORTS = frozenset(
         "discover_parser_plugins",
     }
 )
+_BUILTIN_PARSER_EXPORTS = frozenset(
+    {
+        "XlsxParser",
+        "XlsxParserLimits",
+        "PdfParser",
+        "PdfParserLimits",
+        "DocxParser",
+        "DocxParserLimits",
+        "builtin_document_parsers",
+        "XmlParser",
+        "XmlParserLimits",
+        "HtmlParser",
+        "HtmlParserLimits",
+        "YamlParser",
+        "YamlParserLimits",
+        "builtin_markup_parsers",
+        "html_safe_json",
+        "DelimitedDetectionOptions",
+        "DelimitedDialect",
+        "DelimitedParserLimits",
+        "DelimitedTextParser",
+        "JsonDocumentParser",
+        "JsonLinesParser",
+        "JsonParserLimits",
+        "LogParser",
+        "LogParserLimits",
+        "MarkdownParser",
+        "MarkdownParserLimits",
+        "PlainTextParser",
+        "TextParserLimits",
+        "builtin_delimited_parsers",
+        "builtin_json_parsers",
+        "builtin_text_parsers",
+    }
+)
 _OPTIONAL_DEPENDENCIES = {
+    "xml": frozenset({"defusedxml"}),
+    "yaml": frozenset({"pyyaml"}),
     "postgres": frozenset({"sqlalchemy", "asyncpg", "psycopg"}),
     "pdf": frozenset({"pymupdf"}),
-    "excel": frozenset({"openpyxl"}),
-    "office": frozenset({"python-docx"}),
+    "excel": frozenset({"openpyxl", "defusedxml"}),
+    "office": frozenset({"python-docx", "defusedxml"}),
     "litellm": frozenset({"litellm"}),
-    "tika": frozenset({"tika"}),
+    "tika": frozenset({"httpx", "httpcore", "defusedxml"}),
 }
 _EXPECTED_EXTRAS = frozenset({*_OPTIONAL_DEPENDENCIES, "all"})
 _FORBIDDEN_DEPENDENCIES = frozenset(
@@ -290,6 +350,10 @@ _FORBIDDEN_DEPENDENCIES = frozenset(
 )
 _FORBIDDEN_OPTIONAL_IMPORTS = frozenset(
     {
+        "httpx",
+        "httpcore",
+        "defusedxml",
+        "yaml",
         "asyncpg",
         "docx",
         "fitz",
@@ -301,9 +365,10 @@ _FORBIDDEN_OPTIONAL_IMPORTS = frozenset(
         "tika",
     }
 )
-_PYDANTIC_RUNTIME_CLOSURE = frozenset(
+_CORE_RUNTIME_CLOSURE = frozenset(
     {
         "annotated-types",
+        "charset-normalizer",
         "pydantic",
         "pydantic-core",
         "typing-extensions",
@@ -371,7 +436,7 @@ class MetadataContract:
     requires_python: str
     requires_dist: tuple[str, ...]
     provides_extra: tuple[str, ...]
-    runtime_requirement: str
+    runtime_requirements: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -520,6 +585,15 @@ def _is_pydantic_v2(requirement: str) -> bool:
     return compatible_release or exact_v2 or bounded_v2
 
 
+def _is_charset_normalizer_v3(requirement: str) -> bool:
+    compact = _canonical_requirement(requirement)
+    package_name = "charset-normalizer"
+    if not compact.startswith(package_name):
+        return False
+    version_spec = compact.removeprefix(package_name)
+    return set(version_spec.split(",")) == {">=3.4", "<4"}
+
+
 def _metadata_value(message: Message, field: str) -> str:
     values = message.get_all(field, [])
     if len(values) != 1:
@@ -547,7 +621,7 @@ def _parse_metadata(payload: bytes, *, source: str) -> MetadataContract:
         _normalize_name(str(value).strip())
         for value in message.get_all("Provides-Extra", [])
     )
-    runtime_requirement = _validate_dependency_contract(
+    runtime_requirements = _validate_dependency_contract(
         requires_dist,
         provides_extra,
         source=source,
@@ -557,7 +631,7 @@ def _parse_metadata(payload: bytes, *, source: str) -> MetadataContract:
         requires_python=requires_python,
         requires_dist=tuple(sorted(requires_dist)),
         provides_extra=tuple(sorted(provides_extra)),
-        runtime_requirement=runtime_requirement,
+        runtime_requirements=runtime_requirements,
     )
 
 
@@ -566,7 +640,7 @@ def _validate_dependency_contract(
     provides_extra: tuple[str, ...],
     *,
     source: str,
-) -> str:
+) -> tuple[str, ...]:
     if len(provides_extra) != len(set(provides_extra)):
         raise _fail(f"{source}: Provides-Extra содержит дубликаты")
     if set(provides_extra) != _EXPECTED_EXTRAS:
@@ -599,10 +673,20 @@ def _validate_dependency_contract(
                 raise _fail(f"{source}: неизвестный extra {extra!r}")
             by_extra[extra].append(requirement)
 
-    if len(runtime) != 1 or _requirement_name(runtime[0]) != "pydantic":
-        raise _fail(f"{source}: единственная base dependency должна быть Pydantic v2")
-    if not _is_pydantic_v2(runtime[0]):
+    runtime_by_name = {_requirement_name(item): item for item in runtime}
+    if len(runtime_by_name) != len(runtime):
+        raise _fail(f"{source}: base dependencies содержат дубликаты")
+    if set(runtime_by_name) != {"charset-normalizer", "pydantic"}:
+        raise _fail(
+            f"{source}: base dependencies должны быть ровно "
+            "Pydantic v2 и charset-normalizer v3"
+        )
+    if not _is_pydantic_v2(runtime_by_name["pydantic"]):
         raise _fail(f"{source}: Pydantic должен быть ограничен major-версией 2")
+    if not _is_charset_normalizer_v3(runtime_by_name["charset-normalizer"]):
+        raise _fail(
+            f"{source}: charset-normalizer должен быть ограничен диапазоном >=3.4,<4"
+        )
 
     canonical_by_extra: dict[str, set[str]] = {}
     for extra, extra_requirements in by_extra.items():
@@ -622,7 +706,7 @@ def _validate_dependency_contract(
         expected_all.update(canonical_by_extra[extra])
     if canonical_by_extra["all"] != expected_all:
         raise _fail(f"{source}: extra 'all' не равен объединению остальных extras")
-    return runtime[0].partition(";")[0].strip()
+    return tuple(sorted(item.partition(";")[0].strip() for item in runtime))
 
 
 def _safe_archive_path(name: str, *, source: str) -> PurePosixPath:
@@ -1242,6 +1326,7 @@ def _probe_source(
     contract_exports_json = json.dumps(sorted(_CONTRACT_EXPORTS))
     domain_exports_json = json.dumps(sorted(_DOMAIN_EXPORTS))
     parser_exports_json = json.dumps(sorted(_PARSER_EXPORTS))
+    builtin_parser_exports_json = json.dumps(sorted(_BUILTIN_PARSER_EXPORTS))
     port_exports_json = json.dumps(sorted(_PORT_EXPORTS))
     forbidden_json = json.dumps(sorted(_FORBIDDEN_DEPENDENCIES))
     optional_json = json.dumps(sorted(_FORBIDDEN_OPTIONAL_IMPORTS))
@@ -1258,6 +1343,9 @@ def _probe_source(
         expected_contract_exports = set(json.loads({contract_exports_json!r}))
         expected_domain_exports = set(json.loads({domain_exports_json!r}))
         expected_parser_exports = set(json.loads({parser_exports_json!r}))
+        expected_builtin_parser_exports = set(
+            json.loads({builtin_parser_exports_json!r})
+        )
         expected_port_exports = set(json.loads({port_exports_json!r}))
         forbidden_roots = set(json.loads({forbidden_json!r}))
         optional_roots = set(json.loads({optional_json!r}))
@@ -1277,11 +1365,17 @@ def _probe_source(
             for item in requirements
             if re.search(r"\\bextra\\s*==", item, flags=re.IGNORECASE) is None
         ]
-        if len(runtime) != 1:
+        runtime_names = []
+        for requirement in runtime:
+            match = re.match(r"^\\s*([A-Za-z0-9._-]+)", requirement)
+            if match is None:
+                raise SystemExit(f"invalid runtime dependency: {{requirement}}")
+            runtime_names.append(re.sub(r"[-_.]+", "-", match.group(1)).lower())
+        if len(runtime_names) != len(set(runtime_names)) or set(runtime_names) != {{
+            "charset-normalizer",
+            "pydantic",
+        }}:
             raise SystemExit(f"unexpected runtime requirements: {{runtime}}")
-        match = re.match(r"^\\s*([A-Za-z0-9._-]+)", runtime[0])
-        if match is None or re.sub(r"[-_.]+", "-", match.group(1)).lower() != "pydantic":
-            raise SystemExit(f"unexpected runtime dependency: {{runtime[0]}}")
 
         import structuraguard
 
@@ -1295,12 +1389,20 @@ def _probe_source(
         import structuraguard.contracts as contracts
         import structuraguard.domain as domain
         import structuraguard.parsers as parsers
+        import structuraguard.parsers.builtin as builtin_parsers
+        import structuraguard.parsers.tika as tika_parser
         import structuraguard.ports as ports
+
+        if tika_parser.TikaParserAdapter().config.enabled:
+            raise SystemExit("Tika must remain opt-in")
+        if set(tika_parser.__all__) != {{"TikaConfig", "TikaEgressApproval", "TikaParserAdapter", "TikaParserLimits"}}:
+            raise SystemExit("unexpected Tika exports")
 
         for module, expected in (
             (contracts, expected_contract_exports),
             (domain, expected_domain_exports),
             (parsers, expected_parser_exports),
+            (builtin_parsers, expected_builtin_parser_exports),
             (ports, expected_port_exports),
         ):
             module_exports = tuple(module.__all__)
@@ -1466,7 +1568,7 @@ def verify_distribution(dist_dir: Path) -> None:
     uv = _find_uv()
     runtime_versions = {
         package_name: _locked_registry_version(repository_root, package_name)
-        for package_name in sorted(_PYDANTIC_RUNTIME_CLOSURE)
+        for package_name in sorted(_CORE_RUNTIME_CLOSURE)
     }
     build_versions = _locked_registry_closure(repository_root, "hatchling")
     temporary_base = _temporary_base(repository_root)
