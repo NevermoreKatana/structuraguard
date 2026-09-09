@@ -49,8 +49,15 @@ nav:
       - Public API и run policies: adr/0001-public-api-and-run-policies.md
       - Security boundary defaults: adr/0002-security-boundary-defaults.md
       - Двухэтапная модель parsing: adr/0003-two-stage-parsing-contracts.md
+      - Lossless physical extraction: adr/0004-lossless-physical-extraction.md
+      - Безопасные markup adapters: adr/0005-safe-markup-extraction.md
+      - Ограниченные document adapters: adr/0006-bounded-document-adapters.md
+      - Opt-in Tika egress: adr/0007-opt-in-tika-egress.md
   - Планы:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
       - M02 — domain contracts: plans/M02_domain_contracts.md
       - M03 — parser registry: plans/M03_parser_registry.md
+      - M04 — technical parsers: plans/M04_technical_parsers.md
+      - M04 — аудит приёмки: plans/M04_acceptance_audit.md
+      - M04 — security review: plans/M04_security_review.md

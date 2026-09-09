@@ -9,6 +9,7 @@ description = "Встраиваемый SDK для безопасного имп
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.13,<3",
+    "charset-normalizer>=3.4,<4",
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -22,6 +23,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+xml = ["defusedxml>=0.7.1,<1"]
+yaml = ["PyYAML>=6.0.3,<7"]
 postgres = [
     "SQLAlchemy>=2.0.40,<3",
     "asyncpg>=0.30,<1",
@@ -32,17 +35,23 @@ pdf = [
 ]
 excel = [
     "openpyxl>=3.1.5,<4",
+    "defusedxml>=0.7.1,<1",
 ]
 office = [
     "python-docx>=1.1.2,<2",
+    "defusedxml>=0.7.1,<1",
 ]
 litellm = [
     "litellm>=1.75,<2",
 ]
 tika = [
-    "tika>=3.1,<4",
+    "httpx>=0.28.1,<1",
+    "httpcore==1.0.9",
+    "defusedxml>=0.7.1,<1",
 ]
 all = [
+    "defusedxml>=0.7.1,<1",
+    "PyYAML>=6.0.3,<7",
     "SQLAlchemy>=2.0.40,<3",
     "asyncpg>=0.30,<1",
     "psycopg>=3.2,<4",
@@ -50,7 +59,8 @@ all = [
     "openpyxl>=3.1.5,<4",
     "python-docx>=1.1.2,<2",
     "litellm>=1.75,<2",
-    "tika>=3.1,<4",
+    "httpx>=0.28.1,<1",
+    "httpcore==1.0.9",
 ]
 
 [project.urls]

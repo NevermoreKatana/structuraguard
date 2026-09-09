@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t> Заголовок </t></is></c><c r="B1" t="inlineStr"><is><t> Заголовок </t></is></c></row>
+    <row r="2"><c r="A2"><v>001.20</v></c><c r="B2"><f>SUM(A2,1)</f><v>2.20</v></c><c r="C2"><f>WEBSERVICE("https://example.invalid/")</f></c></row>
+    <row r="4"><c r="A4"/><c r="B4"><v/></c><c r="D4" s="0"><v>45292</v></c></row>
+  </sheetData>
+  <mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells>
+</worksheet>

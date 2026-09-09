@@ -83,6 +83,7 @@ parser: Parser = SemanticParser()
 
 def test_parser_registry_layer_has_no_llm_database_or_orchestrator_dependency() -> None:
     allowed_modules = {
+        "structuraguard.contracts._base",
         "structuraguard.contracts.common",
         "structuraguard.contracts.plugins",
         "structuraguard.contracts.source",
@@ -115,7 +116,7 @@ def test_parser_registry_layer_has_no_llm_database_or_orchestrator_dependency() 
                 ), (source_path, module)
 
 
-def test_m03_has_no_parser_implementation_or_plugin_execution_path() -> None:
+def test_m04_parser_implementations_have_no_analysis_or_plugin_execution_path() -> None:
     forbidden_import_roots = {
         "aiohttp",
         "http",
@@ -143,6 +144,10 @@ def test_m03_has_no_parser_implementation_or_plugin_execution_path() -> None:
     assert source_paths
     for source_path in source_paths:
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        # Единственное opt-in исключение network boundary описано в ADR 0007.
+        allowed_import_roots = {"_tika_http.py": {"httpx"}, "tika.py": {"urllib"}}.get(
+            source_path.relative_to(PARSERS_ROOT).as_posix(), set()
+        )
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 method_names = {
@@ -150,14 +155,17 @@ def test_m03_has_no_parser_implementation_or_plugin_execution_path() -> None:
                     for child in node.body
                     if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
                 }
-                assert not {"probe", "parse"} <= method_names, source_path
                 assert "analyze" not in method_names, source_path
             elif isinstance(node, ast.Import):
                 imported_roots = {alias.name.partition(".")[0] for alias in node.names}
-                assert imported_roots.isdisjoint(forbidden_import_roots), source_path
+                assert imported_roots.isdisjoint(
+                    forbidden_import_roots - allowed_import_roots
+                ), source_path
             elif isinstance(node, ast.ImportFrom):
                 imported_root = (node.module or "").partition(".")[0]
-                assert imported_root not in forbidden_import_roots, source_path
+                assert (
+                    imported_root not in forbidden_import_roots - allowed_import_roots
+                ), source_path
             elif isinstance(node, ast.Call):
                 called_name: str | None = None
                 if isinstance(node.func, ast.Name):

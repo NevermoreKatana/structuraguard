@@ -23,6 +23,7 @@ from .execution import (
     _BoundaryError,
     _normalize_boundary_group,
     _raise_boundary_outcomes,
+    _rebuild_allowed_parser_error,
     _sanitize_cancelled_error,
 )
 
@@ -86,6 +87,10 @@ def _probe_group_failure(
 ) -> ParserError | SecurityPolicyError:
     if isinstance(error, SecurityPolicyError):
         return _detach_security_error(error)
+    if isinstance(error, ParserError):
+        allowed = _rebuild_allowed_parser_error(error)
+        if allowed is not None:
+            return allowed
     return _probe_error(
         "PARSER_PROBE_FAILED",
         adapter_id,
@@ -250,6 +255,16 @@ async def select_parser(
             call_cancellation = _sanitize_cancelled_error(error)
         except SecurityPolicyError as error:
             call_failure = _detach_security_error(error)
+        except ParserError as error:
+            if error.error_code == "PARSER_DEPENDENCY_UNAVAILABLE":
+                unavailable_count += 1
+                continue
+            call_failure = _rebuild_allowed_parser_error(error) or _probe_error(
+                "PARSER_PROBE_FAILED",
+                identity.adapter_id,
+                "call_failed",
+                cause=error,
+            )
         except Exception as error:
             call_failure = _probe_error(
                 "PARSER_PROBE_FAILED",
@@ -302,7 +317,7 @@ async def select_parser(
             if error.error_code == "PARSER_DEPENDENCY_UNAVAILABLE":
                 unavailable_count += 1
                 continue
-            probe_failure = _probe_error(
+            probe_failure = _rebuild_allowed_parser_error(error) or _probe_error(
                 "PARSER_PROBE_FAILED",
                 identity.adapter_id,
                 "typed_probe_failure",

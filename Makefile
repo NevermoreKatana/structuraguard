@@ -2,7 +2,7 @@ UV ?= uv
 RUN = $(UV) run --locked --no-sync
 PYTHON_PATHS = packages/structuraguard/src packages/structuraguard/tests scripts
 
-.PHONY: sync lock-check format lint typecheck test docs build test-build check
+.PHONY: sync lock-check format lint typecheck test test-integration test-security docs build test-build check
 
 sync:
 	$(UV) lock --check
@@ -24,6 +24,12 @@ typecheck:
 
 test:
 	$(RUN) pytest
+
+test-integration:
+	$(RUN) pytest -m integration
+
+test-security:
+	$(RUN) pytest packages/structuraguard/tests/security
 
 docs:
 	$(RUN) mkdocs build --strict --clean

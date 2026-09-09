@@ -12,8 +12,18 @@ members = ["packages/structuraguard"]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1,<1",
+    "openpyxl>=3.1.5,<4",
+    "python-docx>=1.1.2,<2",
+    "PyMuPDF>=1.26,<2",
+    "types-openpyxl>=3.1,<4",
+    "defusedxml>=0.7.1,<1",
+    "PyYAML>=6.0.3,<7",
+    "types-defusedxml>=0.7,<1",
+    "types-PyYAML>=6,<7",
     "anyio>=4.11,<5",
     "hatchling>=1.28,<2",
+    "hypothesis>=6.100,<7",
     "mypy>=2.3,<3",
     "pytest>=8.4,<10",
     "ruff>=0.14,<1",
@@ -62,3 +72,4 @@ pretty = true
 addopts = "--strict-config --strict-markers"
 testpaths = ["packages/structuraguard/tests"]
 xfail_strict = true
+markers = ["integration: реальные document backends и локальный fake HTTP server"]
