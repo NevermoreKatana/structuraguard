@@ -928,6 +928,14 @@ subtree/document отклоняется с `SECURITY_LIMIT_EXCEEDED`. DTD/unsafe
 line number, неизвестный XML codec/невалидный UTF-8 — typed encoding error.
 HTML/YAML имеют явную strict UTF-8 policy.
 
+HTML adapter явно сохраняет marked-section grammar: завершённая section с
+неизвестным именем, например &lt;![bogus]&gt;, даёт `PARSER_MALFORMED_INPUT`
+с physical line number, а поддержанные CDATA и
+conditional sections остаются inert declarations. Это не зависит от нового
+HTML5 dispatch stdlib, превращающего неизвестную section в bogus comment.
+Такой же текст внутри attribute, comment или script/style не считается section
+и сохраняется как raw data; JavaScript и conditional content не исполняются.
+
 YAML probe ищет структурные признаки в первой значимой строке, пропуская
 комментарии; двоеточие в последующей CSV cell не подтверждает YAML. JSONL с
 разными типами корневых records остаётся у JSON adapters. Ошибки подтверждённого

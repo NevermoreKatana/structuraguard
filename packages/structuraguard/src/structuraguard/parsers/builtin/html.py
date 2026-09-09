@@ -162,6 +162,14 @@ class _Dom(HTMLParser):
             raise malformed("invalid_html", line_number=self.getpos()[0]) from None
         self.budget.check("token_chars", len(self.rawdata), self.limits.max_token_chars)
 
+    def parse_html_declaration(self, i: int) -> int:
+        # Новые CPython направляют неизвестные <![... в bogus comments.
+        # Сохраняем прежнюю marked-section grammar и typed отказ через feed/finish,
+        # не затрагивая такой же текст внутри attributes, comments и raw text.
+        if self.rawdata.startswith("<![", i):
+            return self.parse_marked_section(i)
+        return super().parse_html_declaration(i)
+
     def location(
         self, selector: str, order: int, position: tuple[int, int]
     ) -> CssSelectorLocation:
@@ -526,6 +534,8 @@ class HtmlParser:
     Только strict UTF-8. Headings, lists, blocks и tables связаны с деревом
     source events, а не исправленным browser DOM. Script/style/iframe остаются
     неактивными данными; raw output требует escaping при отображении.
+    Завершённая marked section с неизвестным именем отклоняется как malformed input;
+    CDATA и поддержанные conditional sections сохраняются как physical declarations.
 
     Raises:
         ValueError: Передан неверный тип limits.

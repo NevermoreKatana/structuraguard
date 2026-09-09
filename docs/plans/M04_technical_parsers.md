@@ -7,6 +7,10 @@ commit и Draft Pull Request в `main`. Приёмка частичная: по�
 
 Дата плана: 2026-09-04.
 
+Дополнение 2026-09-10: после ручного commit M4 исправлен выявленный CI
+HTML compatibility defect; [новая локальная matrix](#m04-html-ci-fix) не заменяет
+повторный remote CI. Срез передачи от 2026-09-09 ниже сохранён как история.
+
 Ниже сохранён исходный design и последовательность реализации. Фактические
 отклонения, команды и незакрытые gates перечислены в разделе
 [передачи на ручной commit](#m04-manual-handoff).
@@ -1189,6 +1193,57 @@ native worker не равен sandbox, `strict_mode=True` отказывает. 
 PDF fonts/layout и OOXML extensions вне fixture corpus остаются fidelity risk.
 Перед merge нужны ручная оценка открытых gates и решение о release version;
 автоматический bump, staging или commit этим планом не разрешаются.
+
+### HTML compatibility CI: исправление 2026-09-10 {#m04-html-ci-fix}
+
+Пользователь сообщил об одинаковом падении HTML error-boundary case в CI
+Python 3.12/3.13/3.14 после commit `c5abec6`. Причина — новый HTML5 dispatch
+CPython превращает неизвестную marked section в bogus comment; SDK раньше
+полагался на вызов marked-section parser и последующий typed отказ.
+
+`_Dom.parse_html_declaration()` явно сохраняет прежний marked-section dispatch.
+Общий tokenizer не заменён, публичный API, dependencies и CI matrix не менялись.
+Существующий failing case сохранён без skip/xfail; новый
+`tests/unit/parsers/builtin/test_html_compatibility.py` добавляет 39 cases:
+unknown names, chunk/batch boundaries, line provenance, redacted errors,
+отсутствие terminal manifest при отказе, CDATA/conditional declarations,
+inert lookalikes в attributes/comments/script/style и token limits.
+
+До production fix настоящий Python 3.14.2 воспроизвёл исходное падение
+(`1 failed, 2 passed`) и новые regressions (`25 failed, 14 passed`).
+После fix в isolated locked environments, на macOS:
+
+| Python | HTML/markup narrow suite | Полный pytest |
+| --- | --- | --- |
+| 3.12.12 | 99 passed | 1669 passed, 5 warnings |
+| 3.13.11 | 99 passed | 1669 passed, 5 warnings |
+| 3.14.2 | 99 passed | 1669 passed, 5 warnings |
+
+Команды полного повторения:
+
+```bash
+uv run --isolated --locked --all-packages --group dev --no-python-downloads --python 3.12.12 pytest -q
+uv run --isolated --locked --all-packages --group dev --no-python-downloads --python 3.13.11 pytest -q
+uv run --isolated --locked --all-packages --group dev --no-python-downloads --python 3.14.2 pytest -q
+make lock-check lint typecheck docs test-build test-integration test-security
+git diff --check
+```
+
+Перед полными прогонами та же `uv run` команда вызывала pytest только для
+`test_html_compatibility.py` и `test_markup.py`; первые прогоны 3.12.12/3.13.11
+разрешали download интерпретатора. Рабочая `.venv` не заменялась: в ней Python
+3.12.9 также даёт `99 passed`. Lock/Ruff (136 файлов)/mypy (134 файла), strict
+docs, wheel/sdist/rebuild и isolated base verification прошли; отдельные
+integration — `11 passed`, security — `216 passed`. Пять warnings — прежние
+PyMuPDF SWIG deprecations. Первый docs build выявил неэкранированный HTML
+example; после escaping пример не ломает preprocessing старого MkDocs/CPython.
+
+Повторный parser/security review локального fix не выявил новых существенных
+findings: dispatch вызывается только в markup context, не сканирует inert data,
+limits и error redaction сохранены. Raw sample/provenance checks не заменяют
+проверку всех изменений stdlib HTML5. Remote Linux CI ещё не повторён агентом;
+commit/push/PR не выполнялись. AC-06/07/11/12 и release/version gate остаются
+открытыми; исправление этого CI-defect не меняет статус полной приёмки M4.
 
 ## Out of scope
 

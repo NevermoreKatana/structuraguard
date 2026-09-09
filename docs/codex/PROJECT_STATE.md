@@ -1,6 +1,6 @@
 # Состояние проекта StructuraGuard
 
-Обновлено: 2026-09-09.
+Обновлено: 2026-09-10.
 
 ## Текущая версия и milestone
 
@@ -8,14 +8,15 @@
 - Текущий milestone: `M4 — Technical Parsers`; Groups A (`TXT`, `LOG`,
   `MD`), B (`CSV`, `TSV`), C (`JSON`, `JSONL`, `NDJSON`), D (`XML`, `HTML`, `YAML`)
   и E (`XLSX`, text-layer `PDF`, `DOCX`) реализованы.
-- Активная ветка: `feat/m04-technical-parsers`; изменения M4 находятся в
-  рабочем дереве.
+- Активная ветка: `feat/m04-technical-parsers`; базовая реализация M4 находится в
+  commit `c5abec6`, текущая локальная правка исправляет HTML compatibility CI.
 - Group F (`Tika`) реализована отдельно как optional fallback, выключена по умолчанию.
 - [Аудит приёмки M4](../plans/M04_acceptance_audit.md) добавил недостающие tests;
   AC-06/07/11/12 подтверждены частично, milestone не отмечен полностью принятым.
-- Подготовлен ручной commit и Draft PR в `main`: в плане отмечены подтверждённые
-  AC-01–05/08–10, оставшиеся gates открыты. Это не merge/release approval;
-  commit/push/PR не создавались, release bump `0.4.0` не выполнен.
+- В плане отмечены подтверждённые AC-01–05/08–10, оставшиеся gates открыты.
+  После ручного commit пользователь сообщил о падении CI на Python 3.12/3.13/3.14;
+  локальное исправление не означает успешного повторного remote CI.
+  Release bump `0.4.0` не выполнен; агент commit/push/PR не выполнял.
 
 Канонический scope: [M4 в техническом задании][spec-m4] и
 [`M04_technical_parsers.md`](../plans/M04_technical_parsers.md). Format adapters
@@ -341,6 +342,31 @@ distribution verification; отдельно integration — `11 passed`, securit
 - Повторный review handoff diff не добавляет новых существенных findings;
   незакрытые AC и ограничения не скрыты. Staging area пустая; ручные git/PR
   действия остаются за пользователем.
+
+## Исправление HTML compatibility CI 2026-09-10
+
+На базе `c5abec6` устранена зависимость error contract от HTML5 dispatch stdlib:
+marked sections явно направляются в прежний parser, неизвестное имя сохраняет
+`PARSER_MALFORMED_INPUT` с line provenance. Inert text не проверяется как markup.
+Публичный API, dependencies, версии package и CI matrix не менялись.
+
+Исходный тест не ослаблен. Новый `test_html_compatibility.py` содержит 39
+regression cases; до fix на настоящем Python 3.14.2 получено `25 failed,
+14 passed`, после — `99 passed` вместе с прежним markup suite.
+Такие же 99 tests проходят на 3.12.9/3.12.12/3.13.11.
+
+- Полный pytest на Python 3.12.12, 3.13.11 и 3.14.2: по `1669 passed, 5 warnings`.
+- `make lock-check lint typecheck docs test-build test-integration test-security`:
+  exit 0; Ruff 136 файлов, mypy 134 файла, docs/package verification успешны,
+  integration `11 passed`, security `216 passed`.
+- Литерал malformed HTML в новых docs экранирован после обнаруженного падения
+  preprocessing; strict docs build повторён успешно, checks не отключались.
+- Parser/security review fix не выявил новых существенных findings; конкретные
+  команды и ограничения: [дополнение плана M4](../plans/M04_technical_parsers.md#m04-html-ci-fix).
+
+Результаты локальны для macOS с isolated locked environments, рабочая `.venv`
+не заменялась. Повтор remote Linux CI остаётся за новым запуском после передачи
+fix; агент commit/push/PR не выполнял. Открытые AC и release gate M4 сохранены.
 
 ## Принятые архитектурные решения
 
