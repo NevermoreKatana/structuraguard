@@ -360,7 +360,10 @@ async def _cleanup(
     while True:
         try:
             async with asyncio.timeout_at(deadline):
-                await asyncio.shield(task)
+                # Поздняя ошибка driver остаётся здесь: отменённый shield
+                # в Python 3.14 передаёт её несаницированной в event loop.
+                await asyncio.wait((task,))
+                task.result()
             return True, cancelled
         except asyncio.CancelledError:
             cancelled = True

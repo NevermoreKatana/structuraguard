@@ -1,13 +1,14 @@
 # M07 — безопасный Database Inspector
 
-Статус: M7 A/B/C завершён в описанном inspection scope; подготовлен к ручному
-commit и последующему Pull Request в `main`. Commit/push/PR не выполнялись.
+Статус: M7 A/B/C завершён в описанном inspection scope, commit `1027781`.
+Исправление cancellation для Python 3.14 проверено локально и оставлено
+uncommitted. Commit/push/PR в шаге исправления не выполнялись.
 Дата плана: 2026-09-10. Подготовка к передаче: 2026-09-11.
 
-Актуальная приёмка: **2469 tests**, **18 integration**, **482 security**,
-**84 PostgreSQL tests** на Testcontainers 16.15/18.6. Известные findings исправлены;
-повторный review не выявил существенных незакрытых проблем в проверенном diff.
-[Checklist передачи, выполненные команды и пропуски](#checklist-commit-pr).
+Актуальная приёмка: **2474 tests** на Python 3.12.9 и 3.14.2;
+**18 integration**, **487 security**, **84 PostgreSQL tests** на Python 3.14.2
+и Testcontainers 16.15/18.6. [Исправление CI и проверки](#m07-python314).
+[Исторический checklist передачи](#checklist-commit-pr).
 Канонический scope: [§9 — анализ целевой БД](https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#9-анализ-целевой-базы-данных)
 и [M7](https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m7-database-inspector).
 
@@ -21,10 +22,82 @@ commit и последующему Pull Request в `main`. Commit/push/PR не �
 CHECK и зависимость fingerprint от физических пропусков после DROP COLUMN.
 Regression evidence: [исправления review](M07_acceptance.md#m07-final-review-fixes).
 
+## Исправление cancellation на Python 3.14 {#m07-python314}
+
+В присланном CI log Python 3.14.2: 3 failed, 2466 passed, 84 deselected.
+После отмены `asyncio.shield()` позднее исключение внутренней task передавалось
+в exception handler event loop, хотя cleanup уже прочитал его. AnyIO фиксировал
+ошибку вне ожидаемого error path. Связанный путь PostgreSQL cleanup мог таким же
+образом передать необработанный текст driver error, включая sensitive values.
+
+В `database/_inspection.py` и `database/postgresql.py` ожидание заменено на
+`asyncio.wait()` с явным чтением результата. Worker/close не отменяются вместе
+с вызывающей task; прежние cancellation, общий deadline, cleanup budget и запрет
+публикации результата после отмены сохранены. Handler приложения не меняется.
+Публичный API, SQL, catalog, dependencies и существующие tests не изменены.
+
+| Критерий | Regression evidence |
+| --- | --- |
+| K6: отмена/deadline завершают worker без вторичного loop error; даже поздний успешный результат не публикуется | `tests/security/database/test_worker_cancellation.py::test_cancelled_worker_never_reports_handled_error_to_loop`, 4 cases |
+| K6: driver error после отмены cleanup не попадает в loop/logs | `tests/security/database/test_worker_cancellation.py::test_cancelled_postgresql_cleanup_does_not_report_driver_error_to_loop`, fake credential canary, без DB connection |
+| K6/K7: реальный connection lifecycle не нарушен | `tests/integration/database/test_postgresql_security.py`: timeout, повторная отмена, cleanup deadline и отсутствие оставшихся connections на PostgreSQL 16/18 |
+
+Новые regressions на Python 3.14.2 до исправления: **3 failed, 2 passed**.
+После исправления вместе с исходными SQLite/assembly tests: **18 passed**.
+
+Фактически выполненные команды (logs вне repository):
+
+```bash
+UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache uv sync --python /Users/katana/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/bin/python3.14 --all-packages --locked --group dev --group docs
+UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache uv run --locked --no-sync pytest -q --tb=short packages/structuraguard/tests/security/database/test_worker_cancellation.py
+UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache uv run --locked --no-sync pytest -q --tb=short packages/structuraguard/tests/security/database/test_worker_cancellation.py packages/structuraguard/tests/security/database/test_sqlite_read_only.py packages/structuraguard/tests/unit/database/test_inspection_catalog.py
+UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache make lint typecheck
+UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache make test test-integration test-security
+DOCKER_CONFIG=/private/tmp/structuraguard-docker-public DOCKER_HOST=unix:///Users/katana/.docker/run/docker.sock UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache make test-database
+UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache uv run --locked --no-sync pytest -q --tb=short packages/structuraguard/tests/unit/database packages/structuraguard/tests/unit/contracts/test_database_catalog.py packages/structuraguard/tests/security/database
+UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache make test
+UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 make test-build
+make test-build
+UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache make docs
+UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m07-py314 UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs/test_m07_examples.py
+UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache uv lock --check --offline
+git diff --check
+```
+
+| Проверка | Фактический результат |
+| --- | --- |
+| Узкий M7 suite, Python 3.12.9 | 221 passed |
+| `make lint typecheck`, Python 3.14.2 | 268 files formatted; Ruff passed; mypy: 266 source files, passed |
+| `make test`, Python 3.12.9 / 3.14.2 | По 2474 passed, 84 DB cases deselected, 5 прежних PyMuPDF/SWIG warnings |
+| `make test-integration`, Python 3.14.2 | 18 passed, 2540 deselected, 5 прежних warnings |
+| `make test-security`, Python 3.14.2 | 487 passed |
+| `make test-database`, Python 3.14.2 | 84 passed, PostgreSQL 16.15/18.6; без skips/SAWarning |
+| `make test-build`, штатная Python 3.12.9 | wheel/sdist и offline installation/import/examples: passed |
+| Дополнительный `make test-build`, Python 3.14.2 | wheel/sdist созданы; verification остановлена: copied Python во временном venv на macOS не находит `libpython3.14.dylib` |
+| `make docs`, SQLite documentation examples | Strict build passed; 2 examples passed на Python 3.14.2 |
+| `uv lock --check --offline` | 105 packages, exit 0 после повторения вне sandbox: первый вызов uv завершился panic macOS system-configuration |
+| `git diff --check`, просмотр пяти изменённых файлов | Passed; generated/debug artifacts и реальные secrets не найдены; новый password literal — тестовый canary |
+
+Проверены outputs `/private/tmp/structuraguard-m07-py31{2,4}-*.log`.
+`uv --no-sync` предупреждал о различии локального pin 3.12 и отдельной среды;
+pytest header подтверждает фактическую Python 3.14.2. Lock и основная `.venv`
+сохранены. Paid LLM API не вызывались.
+
+- [x] Причина CI воспроизведена и закрыта отдельными regression tests.
+- [x] K6/K7 подтверждены на Python 3.14.2; обратная совместимость — на 3.12.9.
+- [x] Review текущего fix: новых существенных findings не обнаружено;
+      cancellation/resource lifecycle и отсутствие driver error в loop проверены.
+- [x] План/PROJECT_STATE, strict docs/examples и diff/artifact checks актуальны.
+- [ ] Повтор remote CI после fix: локальные изменения ещё не отправлены.
+- [ ] Python 3.13 и другие OS: в этом bugfix прогоне не запускались;
+      проверены затронутая 3.14 и исходная 3.12 на macOS.
+- [ ] Offline installed-package verification на macOS/managed Python 3.14:
+      ограничение временного venv описано выше; build tooling вне scope fix.
+
 ## История реализации A/B/C
 
-Проверки этапов ниже исторические; итоговые counts и готовность относятся к
-[checklist передачи](#checklist-commit-pr), включающему последующие исправления.
+Проверки этапов ниже исторические; актуальные counts включают последующее
+[исправление Python 3.14](#m07-python314).
 
 Фактический API части A: [SQLite metadata inspection](../database-inspection.md),
 [ADR 0015](../adr/0015-bounded-sqlite-inspection.md).
@@ -428,6 +501,10 @@ PostgreSQL path; C завершает публичный каталог/hash/gra
 Фактически выполненные проверки, включая подготовку к commit, перечислены ниже.
 
 ## Передача к ручному commit и PR {#checklist-commit-pr}
+
+Историческая запись передачи до commit `1027781`. Checklist, состав 64 файлов
+и команды ниже сохранены как evidence этого этапа; текущий статус и follow-up
+исправление описаны [выше](#m07-python314).
 
 Ветка `feat/m07-database-inspector`, HEAD `b976282`; локальная `main` указывает
 на тот же commit. Staging area пуст. Remote refs не обновлялись. В текущем шаге

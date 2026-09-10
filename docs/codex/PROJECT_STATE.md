@@ -2,20 +2,25 @@
 
 Обновлено: 2026-09-11.
 
-Последний полный runtime-прогон M7 после исправления финального review:
-**2469 tests**, **18 integration**, **482 security**, **84 PostgreSQL tests**
-на реальных Testcontainers 16.15/18.6; lint, mypy, strict docs и offline
-wheel/sdist verification прошли.
-[Исправления и проверки](#m07-review-fix-checks).
-M7 подготовлен к ручному commit и последующему PR в `main`:
-[итоговый checklist, команды и пропуски](../plans/M07_database_inspector.md#checklist-commit-pr).
-На этапе передачи изменены только план и этот state; source/tests/dependencies
-не менялись. В составе milestone 64 файла (15 modified, 49 untracked), staging
-пуст. Случайных generated/debug artifacts и реальных secrets в просмотренном
-diff не найдено; credential pattern hits относятся к тестовым fixtures/canaries.
-Commit/push/PR не выполнялись; remote `main` и будущий CI остаются непроверенными.
-На этапе передачи повторены strict docs build, два SQLite examples,
-`uv lock --check --offline` и `git diff --check`; все прошли.
+После commit M7 `1027781` исправлено падение cancellation tests в присланном
+CI Python 3.14.2: отменённый `asyncio.shield()` сообщал позднюю ошибку worker
+в event loop. Исправлены ожидание worker и связанный PostgreSQL cleanup path;
+добавлены 5 security regression cases. Публичный API и dependencies сохранены.
+Изменения этого исправления остаются uncommitted; commit/push/PR не выполнялись.
+
+Последний полный прогон: по **2474 tests** на Python 3.12.9 и 3.14.2;
+на Python 3.14.2 — **18 integration**, **487 security**, **84 PostgreSQL tests**
+на реальных Testcontainers 16.15/18.6. Lint и mypy прошли; offline wheel/sdist
+verification прошла на штатной Python 3.12.9. Дополнительный installed-package
+probe на macOS/managed Python 3.14 остановлен отсутствующей `libpython3.14.dylib`
+во временном copied venv. Повтор remote CI после fix ещё не подтверждён.
+[Причина, regression matrix, команды и ограничения](../plans/M07_database_inspector.md#m07-python314).
+Strict docs, 2 SQLite examples, offline lock check и `git diff --check` прошли.
+В пяти файлах fix не найдено secrets/generated/debug artifacts; новый password
+literal — regression canary. Повторный review существенных findings не выявил.
+
+[Историческая передача M7 до commit](../plans/M07_database_inspector.md#checklist-commit-pr)
+и [проверки финального review](#m07-review-fix-checks) сохранены для трассировки.
 Предыдущая проверка документации и примеров фиксируется [ниже](#m07-docs-checks).
 Это подтверждение ограниченного inspection scope, без SDK orchestration/load.
 
@@ -33,9 +38,10 @@ Commit/push/PR не выполнялись; remote `main` и будущий CI �
 - `M5 — Structural Profiler и deterministic ParsePlan`:
   A (`StructuralProfiler`), B (`DeterministicStructureAnalyzer`) и C
   (`ParsePlanValidator`/`ParsePlanExecutor`) реализованы в пределах закрытой policy.
-- Активная ветка: `feat/m07-database-inspector`, HEAD `b976282`
-  (merge M6 PR #7). Изменения M7 локальные; версия package не повышалась.
-  Commit/push/PR в текущей работе не выполнялись.
+- Активная ветка: `feat/m07-database-inspector`, HEAD `1027781`
+  (`feat(database): реализовать безопасный Database Inspector M7`).
+  Follow-up fix Python 3.14 локальный, версия package не повышалась.
+  Commit/push/PR в шаге исправления не выполнялись.
 - Исторические checklist, состав diff, команды и незакрытые пункты передачи M5:
   [подготовка M5](../plans/M05_parse_plan.md#checklist-commit-pr).
 - [Матрица приёмки M5](../plans/M05_acceptance.md) связывает критерии с tests

@@ -95,7 +95,10 @@ async def run_inspection[Result](
     task = asyncio.create_task(asyncio.to_thread(operation, control))
     try:
         async with asyncio.timeout(limits.timeout_seconds):
-            return await asyncio.shield(task)
+            # wait не отменяет worker и не логирует его позднюю ошибку,
+            # как отменённый shield в Python 3.14; результат читаем сами.
+            await asyncio.wait((task,))
+            return task.result()
     except (asyncio.CancelledError, TimeoutError):
         control.cancel()
         # Дождаться завершения worker: to_thread cancellation сама не закрывает DB.
@@ -106,12 +109,11 @@ async def run_inspection[Result](
                 task.add_done_callback(_consume_result)
                 raise failure("DATABASE_INSPECTION_CLEANUP_FAILED") from None
             try:
-                await asyncio.wait_for(asyncio.shield(task), remaining)
+                done, _ = await asyncio.wait((task,), timeout=remaining)
             except asyncio.CancelledError:
                 control.cancel()
-            except DatabaseInspectionError:
-                break
-            except TimeoutError:
+                continue
+            if not done:
                 task.add_done_callback(_consume_result)
                 raise failure("DATABASE_INSPECTION_CLEANUP_FAILED") from None
         if task.done():
