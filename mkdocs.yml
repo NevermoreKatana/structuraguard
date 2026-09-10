@@ -44,6 +44,8 @@ nav:
   - Требования: requirements.md
   - Архитектура: architecture.md
   - Публичный API: public-api.md
+  - Структурный разбор M5: structure.md
+  - Безопасность ParsePlan: security.md
   - Модель угроз: threat-model.md
   - ADR:
       - Public API и run policies: adr/0001-public-api-and-run-policies.md
@@ -53,6 +55,9 @@ nav:
       - Безопасные markup adapters: adr/0005-safe-markup-extraction.md
       - Ограниченные document adapters: adr/0006-bounded-document-adapters.md
       - Opt-in Tika egress: adr/0007-opt-in-tika-egress.md
+      - Bounded structural profiling: adr/0008-bounded-structural-profiling.md
+      - Deterministic structure analysis: adr/0009-deterministic-structure-analysis.md
+      - Проверяемое ParsePlan execution: adr/0010-verified-parse-plan-execution.md
   - Планы:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
@@ -61,3 +66,6 @@ nav:
       - M04 — technical parsers: plans/M04_technical_parsers.md
       - M04 — аудит приёмки: plans/M04_acceptance_audit.md
       - M04 — security review: plans/M04_security_review.md
+      - M05 — structural parsing: plans/M05_parse_plan.md
+      - M05 — аудит приёмки: plans/M05_acceptance.md
+      - M05 — security review: plans/M05_security_review.md

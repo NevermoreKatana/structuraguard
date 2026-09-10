@@ -55,6 +55,13 @@ physical model, markup/document isolation и Tika egress закреплены в
 [ADR 0007](adr/0007-opt-in-tika-egress.md). Эти реализации не означают готовность
 описанного ниже полного application pipeline.
 
+Этап A M5 реализован отдельным `structure.StructuralProfiler`: он принимает
+physical stream через port, перепроверяет lineage и строит bounded profile
+с typed observations, coverage и несколькими кандидатами. Этап B добавляет
+`DeterministicStructureAnalyzer` ([ADR 0009](adr/0009-deterministic-structure-analysis.md)).
+Этап C реализует независимую validation/execution ([ADR 0010](adr/0010-verified-parse-plan-execution.md)); facade integration остаётся последующим этапом. Решения о sampling, пустом source и profile schema закреплены в
+[ADR 0008](adr/0008-bounded-structural-profiling.md).
+
 ### Package layout M3
 
 Корень репозитория является виртуальным `uv` workspace и не создаёт второй
@@ -562,3 +569,23 @@ runner.
 deployment, worker, UI, OCR/media processing, administrative migrations и
 production support других СУБД. Полный out-of-scope и acceptance traceability
 также определены в требованиях.
+
+### Deterministic structure analysis M5-B
+
+`structure/analysis.py` использует тот же bounded проверяющий проход, что и
+profiler, и компилирует конечные декларативные планы через `structure/planning.py`.
+Неполное покрытие/неизвестные правила возвращают `NEEDS_SEMANTIC_ANALYSIS`,
+несколько scopes — ranked candidates. LLM, сеть и исполнение отсутствуют.
+Contracts schema 1.1.0 добавляют literal tree steps, explicit records и derivation;
+старые DTO остаются совместимыми. [ADR 0009](adr/0009-deterministic-structure-analysis.md)
+фиксирует проверяемость координат, scoring и границу с M5-C.
+
+### Проверка и выполнение ParsePlan M5-C
+
+`structure/validation.py` принимает только закрытую policy после полного physical
+replay. `structure/execution.py` повторяет проверки через общий `PlanRuntime`,
+выдаёт bounded NormalizedBatch и terminal manifest только после успешного EOF и
+cleanup. Raw parent values и точные locations сохраняются в `origins` schema 1.1.0.
+Неоконченные batches требуют downstream staging; LLM и database writes отсутствуют.
+Ресурсные границы и совместимость: [ADR 0010](adr/0010-verified-parse-plan-execution.md),
+[security](security.md), [API](public-api.md#parseplanvalidator-parseplanexecutor-m5-c).

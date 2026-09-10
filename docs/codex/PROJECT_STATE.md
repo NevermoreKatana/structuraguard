@@ -5,23 +5,28 @@
 ## Текущая версия и milestone
 
 - Версия package: `0.3.0`.
-- Текущий milestone: `M4 — Technical Parsers`; Groups A (`TXT`, `LOG`,
-  `MD`), B (`CSV`, `TSV`), C (`JSON`, `JSONL`, `NDJSON`), D (`XML`, `HTML`, `YAML`)
-  и E (`XLSX`, text-layer `PDF`, `DOCX`) реализованы.
-- Активная ветка: `feat/m04-technical-parsers`; базовая реализация M4 находится в
-  commit `c5abec6`, текущая локальная правка исправляет HTML compatibility CI.
-- Group F (`Tika`) реализована отдельно как optional fallback, выключена по умолчанию.
-- [Аудит приёмки M4](../plans/M04_acceptance_audit.md) добавил недостающие tests;
-  AC-06/07/11/12 подтверждены частично, milestone не отмечен полностью принятым.
-- В плане отмечены подтверждённые AC-01–05/08–10, оставшиеся gates открыты.
-  После ручного commit пользователь сообщил о падении CI на Python 3.12/3.13/3.14;
-  локальное исправление не означает успешного повторного remote CI.
-  Release bump `0.4.0` не выполнен; агент commit/push/PR не выполнял.
+- Текущий milestone: `M5 — Structural Profiler и deterministic ParsePlan`.
+  A (`StructuralProfiler`), B (`DeterministicStructureAnalyzer`) и C
+  (`ParsePlanValidator`/`ParsePlanExecutor`) реализованы в пределах закрытой policy.
+- Активная ветка: `feat/m05-parse-plan`; текущие изменения M5 локальные.
+  Версия package не повышалась; commit/push/PR в этой работе не выполнялись.
+- M5 подготовлен к ручному commit и PR в `main` в пределах документированной
+  policy. Актуальные checklist, состав diff, команды и незакрытые пункты:
+  [подготовка M5](../plans/M05_parse_plan.md#checklist-commit-pr).
+- [Матрица приёмки M5](../plans/M05_acceptance.md) связывает критерии с tests
+  и отдельно фиксирует неподдержанные/deferred сценарии.
+- [Security review M5](../plans/M05_security_review.md): исправлены 1 High и
+  2 Medium, добавлены 17 regression cases. Неисправленных подтверждённых
+  Critical/High/Medium findings в проверенном diff не осталось.
+- M4 Groups A–E и optional F (`Tika`, default off) остаются parser boundary.
+  Остаточные ограничения [приёмки M4](../plans/M04_acceptance_audit.md) сохраняются.
+  Локальные gates M5 не подтверждают remote CI или реальный Tika deployment.
 
-Канонический scope: [M4 в техническом задании][spec-m4] и
-[`M04_technical_parsers.md`](../plans/M04_technical_parsers.md). Format adapters
-доступны в описанном scope; semantic services и pipeline следующих milestones
-не считаются доступными.
+Канонический scope: [FR-014][spec-fr-014] и [M5 в техническом задании][spec-m5].
+Фактическая policy и отличия от предварительного design:
+[`M05_parse_plan.md`](../plans/M05_parse_plan.md). Копируемый пример:
+[CSV → NormalizedBatch](../structure.md). Facade pipeline следующих этапов
+не считается доступным.
 
 ## Состояние milestones
 
@@ -34,7 +39,8 @@
 - `M4` — в работе: реализованы Groups A (`TXT`, `LOG`, `MD`), B (`CSV`, `TSV`)
   C (`JSON`, `JSONL`, `NDJSON`), D (`XML`, `HTML`, `YAML`) и E (`XLSX`, `PDF`, `DOCX`).
   Optional F (`Tika`) реализована вне default factories.
-- `M5`–`M17` — не начаты.
+- `M5` — реализованы A/B/C; подтверждён только scope, описанный в API и ADR 0008–0010.
+- `M6`–`M17` — не начаты.
 
 ## Реализованные публичные contracts
 
@@ -43,7 +49,7 @@
 - `structuraguard.contracts` экспортирует frozen DTO physical `Extracted*`,
   discriminated `ParsePlan`, semantic `Normalized*`, `DatabaseCatalog`,
   target-bound `MappingPlan`, checked-plan wrappers, reports и audit events.
-- `structuraguard.ports` экспортирует ровно девять protocols: `Parser`,
+- `structuraguard.ports` экспортирует десять protocols: `Parser`, `StructuralProfiler`,
   `SemanticStructureAnalyzer`, `ParsePlanValidator`, `ParsePlanExecutor`,
   `DatabaseAdapter`, `LLMProvider`, `SecurityScanner`, `StagingStore` и
   `AuditStore`.
@@ -84,9 +90,123 @@
   сохраняет `code`/`message_key` без free-form text; `LoadReport` именует target
   и всю execution fingerprint chain.
 
-Semantic analyzer/validator/executor, DB reflection и
-load, LLM providers, staging/audit backends, sandbox runner, state machine и
-orchestrator не реализованы.
+`structuraguard.structure` экспортирует profiler, deterministic analyzer,
+validator/executor и их immutable options. Semantic meaning остаётся unresolved.
+LLM-assisted analyzer, DB reflection/load, LLM providers, staging/audit backends,
+sandbox runner, state machine и orchestrator не реализованы.
+
+## Подтверждённое поведение M5
+
+- Bounded профиль schema 1.1.0: observations четырёх семейств, field hints,
+  evidence/confidence, coverage и несколько кандидатов. Raw source целиком
+  не удерживается. Пустой source даёт пустой профиль.
+- Analyzer строит один plan при достаточном confidence и полном покрытии,
+  ranked alternatives при неоднозначности либо NEEDS_SEMANTIC_ANALYSIS.
+  Confidence — minimum boundary/regularity/coverage, default threshold 0.85.
+  Другие modes явно отклоняются; LLM/network fallback отсутствует.
+- Validator требует полный physical replay; executor повторно проверяет
+  source/wrapper/context, сохраняет raw values, origins и selection trace.
+  Schema 1.1.0 normalized hashes перепроверяются публичными validation methods.
+- Record budget применяется инкрементально, в том числе к child collections.
+  Source exceptions очищаются с сохранением известных codes и parser/security
+  категорий. Cancellation и partial errors не становятся успешным terminal.
+- Output до terminal manifest предварителен и требует downstream staging/rollback.
+  Fingerprints подтверждают согласованность, но не подлинность источника.
+  Profiles и normalized values могут содержать PII; это не безопасные logs.
+
+Не реализованы semantic conversions, identity/отдельные ParseRule, executable
+regex, автоматический выбор ambiguous candidates, replay store и facade wiring.
+Sampling gaps запрещают automatic plan. XML element matching, optional tree
+fields и неподтверждённые multi-scope regions требуют отдельной policy.
+Подробные ограничения и test mapping: [приёмка](../plans/M05_acceptance.md).
+
+## Проверки M5
+
+После security fixes: узкие M5/DTO suites — `758 passed`, полный `make test` —
+`1832 passed`, integration — `16 passed`, security — `319 passed`.
+Ruff, strict mypy, strict MkDocs и `git diff --check` прошли. Команды и evidence:
+[security report](../plans/M05_security_review.md).
+
+Документация M5 добавляет [исполняемый офлайн-пример](../structure.md) и проверку
+русских public docstrings в `tests/docs/test_m05_examples.py` (11 новых cases).
+Новые tests запущены первыми, затем весь documentation suite и quality gates.
+Все команды ниже выполнены с
+`UV_CACHE_DIR=/private/tmp/structuraguard-m05-uv-cache`:
+
+| Команда | Фактический результат после обновления документации |
+| --- | --- |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs/test_m05_examples.py` | `11 passed`, 0.41 s |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs` | `56 passed`, 1.46 s; пример M5 проверяет raw values, provenance и unresolved semantics с запретом сети |
+| `make lint typecheck docs` | Ruff: 173 файла, без замечаний; strict mypy: 171 файл, без ошибок; MkDocs strict: exit 0, внутренние ссылки/anchors проверены |
+| `make test test-integration test-security` | `1843 passed` (62.11 s); `16 passed / 1827 deselected` (3.46 s); `319 passed` (15.13 s); exit 0 |
+| `git diff --check` | exit 0 |
+
+В production-коде этого документационного изменения обновлены только docstrings;
+сравнение AST 20 файлов structure/contracts это подтверждает. Новых архитектурных
+решений и dependencies нет; ADR 0008–0010 связаны с текущим scope без нового ADR.
+После записи результатов MkDocs strict запущен повторно. Канонические anchors
+FR-014, FR-012.2 и M5 сверены с локальным ТЗ; внешний сетевой link checker не настроен.
+Сохранены пять upstream SWIG warnings полного/integration прогона.
+Большой RSS/stress corpus, другая ОС и remote CI в этой работе не запускались.
+
+После финального review исправлены ещё три finding в рамках прежнего scope:
+
+| Finding | Исправление и regression test |
+| --- | --- |
+| High: document blocks пропадали при наличии physical lines | Исключаются только blocks с подтверждённым совпадением диапазона и полного текста lines, включая окончания строк. Независимые blocks остаются кандидатами: `test_independent_blocks_remain_candidates_beside_physical_lines`; multiline LOG и прежний Markdown error contract сохранены |
+| Medium: sparse CSV накапливал пустые строки в runtime index | Lookup не вставляет отсутствующую строку. `test_sparse_rows_do_not_accumulate_outside_selected_scope` проверяет validator/executor: индекс содержит 3 непустые строки при диапазоне 5 000 строк |
+| Medium: двойной знак приводил к `decimal.InvalidOperation` | Primitive hint допускает не более одного знака. `test_invalid_signed_value_does_not_crash_footer_analysis` и property `test_numeric_hint_is_always_a_valid_finite_decimal` проверяют безопасный отказ от числовой гипотезы; валидные signed totals сохранены |
+
+Добавлены 20 regression cases и одна property. До исправлений новые cases дали
+`11 failed / 9 passed`; после исправлений узкие M5 suites — `184 passed` (12.92 s).
+Публичный API, утверждённый scope и production dependencies не изменены.
+Повторный review исправлений, включая security, существенных findings не выявил.
+
+| Команда после исправлений review | Фактический результат |
+| --- | --- |
+| `make lint typecheck` | Ruff: 175 файлов без замечаний; strict mypy: 173 файла без ошибок |
+| `make test` | `1864 passed`, 5 upstream SWIG warnings, 62.73 s |
+| `make test-integration` | `16 passed / 1848 deselected`, 5 upstream SWIG warnings, 3.55 s |
+| `make test-security` | `321 passed`, 15.68 s |
+
+### Подготовка ручного commit и PR M5
+
+Локальный `main` и `HEAD` совпадают (`dfed5ce`); новых commits нет. Diff содержит
+64 файла: 17 modified и 47 new, включая все модули M5. Staging/push/PR не выполнялись.
+Сканирование всех файлов diff не обнаружило secrets, debugger imports или
+случайных generated files. `dist/`, `site/` и caches игнорируются Git; property
+`_hashseed_probe.py` и вывод проверочного CLI являются штатными test tools.
+
+При проверке обнаружен и исправлен Medium packaging blocker:
+`scripts/verify_distribution.py` отклонял 18 новых модулей как неожиданные файлы,
+не учитывал новый port и не импортировал публичный `structure` в isolated smoke.
+Allowlist расширен явным перечнем M5; пять новых cases проверяют inventory,
+exports и отказ для посторонних файлов. До исправления — `3 failed / 7 passed`;
+после него полный packaging suite — `26 passed`. Runtime API и dependencies
+этот шаг не меняет. Повторный review обновлённого gate существенных findings
+не выявил; проверки неизвестных файлов и optional imports сохранены.
+
+Свежие gates на macOS/Python 3.12.9:
+
+| Команда | Результат |
+| --- | --- |
+| Узкие M5 suites | `184 passed` |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs` | `56 passed`, offline example включён |
+| `make lock-check` | exit 0, 100 packages resolved |
+| `make lint typecheck` | Ruff 175 файлов и strict mypy 173 файла без ошибок |
+| `make test test-integration test-security` | `1869 passed` (62.95 s); `16 passed / 1853 deselected` (3.48 s); `321 passed` (15.62 s) |
+| `make test-build` | `distribution verification OK`: wheel/sdist, byte-for-byte offline rebuild, isolated base import с M5 |
+| `make docs`, `git diff --check` | exit 0 |
+
+Для offline rebuild использован существующий `UV_CACHE_DIR=/Users/katana/.cache/uv`:
+временный cache не содержал Hatchling 1.32.0. Uv/SystemConfiguration и document
+watchdog checks повторены вне sandbox после системных отказов, без отключения
+проверок. Пять upstream SWIG warnings полного/integration suite не подавлены.
+
+Полная автоматизация исходного C3 и deferred operations ADR 0010 не заявлены
+готовыми. Remote CI/другие окружения, большой RSS corpus, all-extras matrix,
+реальный Tika и внешние audit/link services не проверялись; причина каждого
+пропуска указана в [плане M5](../plans/M05_parse_plan.md#residual-risks).
 
 ## Известные ограничения M3
 
@@ -384,13 +504,23 @@ fix; агент commit/push/PR не выполнял. Открытые AC и rel
   worker, read-only OOXML fidelity, POSIX limits и граница sandbox M12.
 - [ADR 0007](../adr/0007-opt-in-tika-egress.md) — opt-in Tika HTTP fallback,
   source-bound secret approval, response-relative XHTML provenance и caller isolation.
+- [ADR 0008](../adr/0008-bounded-structural-profiling.md) — bounded sampling,
+  profile coverage и evidence без потери неоднозначности.
+- [ADR 0009](../adr/0009-deterministic-structure-analysis.md) — deterministic
+  scoring, закрытая grammar и unresolved semantics.
+- [ADR 0010](../adr/0010-verified-parse-plan-execution.md) — physical replay,
+  недоверенный wrapper, provenance и terminal success после cleanup.
 
 ## Следующий рекомендуемый шаг
 
-Провести milestone acceptance Groups A–E и отдельный deployment acceptance Tika,
-если caller включает optional F: fake tests не проверяют реальный сервер и его
-изоляцию. M12 sandbox, Windows worker и OCR не
-реализованы; strict document mode отказывает явно. PyMuPDF AGPL/commercial
-licensing требует проверки у владельца embedding-приложения.
+Вручную создать commit M5 и PR в `main`, затем подтвердить remote CI на
+поддерживаемых версиях Python перед merge. Рекомендуемые commit/PR описывают
+bounded profiling и проверяемое deterministic ParsePlan execution, а ограничения
+исходного C3 остаются явными в PR body.
+Последующие semantic/DB/pipeline этапы планировать отдельно по ТЗ; текущий M5
+не предоставляет их через скрытый fallback. Остаточные проверки parser backends
+и реального Tika deployment остаются в [приёмке M4](../plans/M04_acceptance_audit.md).
 
 [spec-m4]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m4-technical-parsers
+[spec-fr-014]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-014-structural-profiling-и-parseplan
+[spec-m5]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m5-structural-profiler-и-deterministic-parseplan

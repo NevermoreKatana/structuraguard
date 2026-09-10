@@ -43,18 +43,36 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/config.py",
         "structuraguard/contracts/__init__.py",
         "structuraguard/contracts/_base.py",
+        "structuraguard/contracts/analysis.py",
         "structuraguard/contracts/common.py",
         "structuraguard/contracts/database.py",
+        "structuraguard/contracts/execution.py",
         "structuraguard/contracts/mapping.py",
         "structuraguard/contracts/normalized.py",
         "structuraguard/contracts/parsing.py",
         "structuraguard/contracts/plugins.py",
         "structuraguard/contracts/reports.py",
         "structuraguard/contracts/source.py",
+        "structuraguard/contracts/structure.py",
         "structuraguard/domain/__init__.py",
         "structuraguard/domain/canonical.py",
         "structuraguard/domain/lineage.py",
         "structuraguard/exceptions.py",
+        "structuraguard/structure/__init__.py",
+        "structuraguard/structure/_observations.py",
+        "structuraguard/structure/_plan_check.py",
+        "structuraguard/structure/_runtime.py",
+        "structuraguard/structure/_samples.py",
+        "structuraguard/structure/_stream.py",
+        "structuraguard/structure/analysis.py",
+        "structuraguard/structure/document.py",
+        "structuraguard/structure/execution.py",
+        "structuraguard/structure/planning.py",
+        "structuraguard/structure/profiling.py",
+        "structuraguard/structure/tabular.py",
+        "structuraguard/structure/text.py",
+        "structuraguard/structure/tree.py",
+        "structuraguard/structure/validation.py",
         "structuraguard/parsers/__init__.py",
         "structuraguard/parsers/_hashing.py",
         "structuraguard/parsers/_registration.py",
@@ -272,6 +290,18 @@ _PORT_EXPORTS = frozenset(
         "SecurityScanner",
         "SemanticStructureAnalyzer",
         "StagingStore",
+        "StructuralProfiler",
+    }
+)
+_STRUCTURE_EXPORTS = frozenset(
+    {
+        "DeterministicStructureAnalyzer",
+        "ParsePlanExecutor",
+        "ParsePlanOptions",
+        "ParsePlanValidator",
+        "StructuralProfiler",
+        "StructuralProfilingOptions",
+        "StructureAnalysisOptions",
     }
 )
 _PARSER_EXPORTS = frozenset(
@@ -1328,6 +1358,7 @@ def _probe_source(
     parser_exports_json = json.dumps(sorted(_PARSER_EXPORTS))
     builtin_parser_exports_json = json.dumps(sorted(_BUILTIN_PARSER_EXPORTS))
     port_exports_json = json.dumps(sorted(_PORT_EXPORTS))
+    structure_exports_json = json.dumps(sorted(_STRUCTURE_EXPORTS))
     forbidden_json = json.dumps(sorted(_FORBIDDEN_DEPENDENCIES))
     optional_json = json.dumps(sorted(_FORBIDDEN_OPTIONAL_IMPORTS))
     runtime_versions_json = json.dumps(expected_runtime_versions, sort_keys=True)
@@ -1347,6 +1378,7 @@ def _probe_source(
             json.loads({builtin_parser_exports_json!r})
         )
         expected_port_exports = set(json.loads({port_exports_json!r}))
+        expected_structure_exports = set(json.loads({structure_exports_json!r}))
         forbidden_roots = set(json.loads({forbidden_json!r}))
         optional_roots = set(json.loads({optional_json!r}))
         expected_runtime_versions = json.loads({runtime_versions_json!r})
@@ -1392,6 +1424,7 @@ def _probe_source(
         import structuraguard.parsers.builtin as builtin_parsers
         import structuraguard.parsers.tika as tika_parser
         import structuraguard.ports as ports
+        import structuraguard.structure as structure
 
         if tika_parser.TikaParserAdapter().config.enabled:
             raise SystemExit("Tika must remain opt-in")
@@ -1404,6 +1437,7 @@ def _probe_source(
             (parsers, expected_parser_exports),
             (builtin_parsers, expected_builtin_parser_exports),
             (ports, expected_port_exports),
+            (structure, expected_structure_exports),
         ):
             module_exports = tuple(module.__all__)
             if len(module_exports) != len(set(module_exports)) or set(module_exports) != expected:
@@ -1550,7 +1584,7 @@ def _select_artifacts(dist_dir: Path) -> tuple[Path, Path]:
 
 
 def verify_distribution(dist_dir: Path) -> None:
-    """Выполнить полный offline contract test артефактов M1."""
+    """Проверить wheel/sdist, offline rebuild и isolated import текущего SDK."""
 
     repository_root = Path(__file__).resolve().parents[1]
     wheel, sdist = _select_artifacts(dist_dir.resolve())

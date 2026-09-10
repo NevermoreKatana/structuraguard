@@ -22,6 +22,7 @@ _ALLOWED_EXTERNAL_ROOTS = {
             "pydantic_core",
             "re",
             "typing",
+            "types",  # MappingProxyType для immutable views; stdlib без I/O.
             "unicodedata",
         }
     ),

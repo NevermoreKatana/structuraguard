@@ -12,9 +12,33 @@ from structuraguard.contracts.parsing import (
     ParsePlanValidationResult,
     StructureAnalysisRequest,
     StructureAnalysisResult,
+    StructureProfile,
     ValidatedParsePlan,
 )
 from structuraguard.contracts.source import ExtractedBatch
+
+
+@runtime_checkable
+class StructuralProfiler(Protocol):
+    """Строит bounded профиль завершённого extraction без DB/LLM и execution."""
+
+    async def profile(
+        self,
+        batches: ExtractedBatch | AsyncIterable[ExtractedBatch],
+    ) -> StructureProfile:
+        """Прочитать terminal batch либо весь поток с terminal manifest.
+
+        Args:
+            batches: Один terminal batch либо полный async stream одного extraction.
+
+        Returns:
+            Профиль с coverage, evidence и всеми удержанными кандидатами.
+            Пустой source даёт пустой профиль, а не выдуманные references.
+
+        Security:
+            Реализация проверяет stream, применяет конечные budgets и закрывает
+            полученный iterator; full source не удерживается в памяти.
+        """
 
 
 @runtime_checkable
@@ -32,10 +56,14 @@ class SemanticStructureAnalyzer(Protocol):
                 одного extraction run.
 
         Returns:
-            Созданный plan, запрос проверки кандидатов или отклонение.
+            Созданный plan, ranked кандидаты, NEEDS_SEMANTIC_ANALYSIS
+            при нехватке evidence либо отклонение неподдержанного mode.
 
         Security:
             Результат остаётся недоверенным и сам не разрешает execution.
+            Deterministic реализация M5 требует physical replay через расширенный
+            analyze(request, batches=replay); вызов без replay возвращает
+            NEEDS_SEMANTIC_ANALYSIS с issue STRUCTURE_REPLAY_REQUIRED.
         """
 
 
@@ -54,6 +82,10 @@ class ParsePlanValidator(Protocol):
 
         Returns:
             Решение проверки; checked wrapper доступен только при принятии.
+
+        Реализация M5 без physical replay возвращает REJECTED с
+        PARSE_PLAN_REPLAY_REQUIRED. Для acceptance нужны её расширенные
+        validate(request, batches=iterable) либо async validate_source.
         """
 
 
@@ -75,10 +107,16 @@ class ParsePlanExecutor(Protocol):
             context: Lineage и limits текущего execution run.
 
         Yields:
-            ``NormalizedBatch`` с physical provenance.
+            ``NormalizedBatch`` с physical provenance. Non-terminal batches
+            предварительны до EOF, проверки refs и успешного cleanup.
+
+        Raises:
+            ParseExecutionError: Typed issue при нарушении plan/source/limits.
+            asyncio.CancelledError: Отмена после cleanup owned iterator.
 
         Security:
             Сигнатура принимает только ``ValidatedParsePlan`` и не содержит
             execution callbacks. Строковые значения остаются данными: port не
-            разрешает исполнять их содержимое.
+            разрешает исполнять их содержимое. Wrapper и source перепроверяются;
+            caller обеспечивает staging/rollback и aclose при раннем выходе.
         """
