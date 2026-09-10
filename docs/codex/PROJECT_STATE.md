@@ -1,32 +1,42 @@
 # Состояние проекта StructuraGuard
 
-Обновлено: 2026-09-10.
+Обновлено: 2026-09-11.
 
-Последний полный запуск перед ручным commit и Draft PR M6:
-**2219 tests**, **18 integration**, **433 security**, lint (225 файлов), mypy
-(223 файла), strict docs, lock-check и offline wheel/sdist verification — успешно.
-Команды и результаты:
-[checklist передачи M6](../plans/M06_llm_semantic_parsing.md#checklist-commit-pr).
-Это не означает полную приёмку исходного scope: K5/K7 подтверждены частично.
-Наблюдаемые tests и незавершённые сценарии: [матрица M6](../plans/M06_acceptance.md).
-Предыдущие проверки сохранены отдельно:
-[security review M6](../plans/M06_security_review.md) и
-[docs/examples](#m06-docs-checks).
+Последний полный runtime-прогон M7 после исправления финального review:
+**2469 tests**, **18 integration**, **482 security**, **84 PostgreSQL tests**
+на реальных Testcontainers 16.15/18.6; lint, mypy, strict docs и offline
+wheel/sdist verification прошли.
+[Исправления и проверки](#m07-review-fix-checks).
+M7 подготовлен к ручному commit и последующему PR в `main`:
+[итоговый checklist, команды и пропуски](../plans/M07_database_inspector.md#checklist-commit-pr).
+На этапе передачи изменены только план и этот state; source/tests/dependencies
+не менялись. В составе milestone 64 файла (15 modified, 49 untracked), staging
+пуст. Случайных generated/debug artifacts и реальных secrets в просмотренном
+diff не найдено; credential pattern hits относятся к тестовым fixtures/canaries.
+Commit/push/PR не выполнялись; remote `main` и будущий CI остаются непроверенными.
+На этапе передачи повторены strict docs build, два SQLite examples,
+`uv lock --check --offline` и `git diff --check`; все прошли.
+Предыдущая проверка документации и примеров фиксируется [ниже](#m07-docs-checks).
+Это подтверждение ограниченного inspection scope, без SDK orchestration/load.
+
+Исторические проверки M3–M6 ниже сохранены для трассировки; их Git/checklist
+сведения не являются текущим статусом ветки. Незавершённые сценарии M6 остаются
+явными в [матрице M6](../plans/M06_acceptance.md).
 
 ## Текущая версия и milestone
 
 - Версия package: `0.3.0`.
-- Текущий milestone: `M6 — LLM-assisted Semantic Parsing`; реализован provider
-  foundation A, минимальный HTTP/router B, LLMStructureAnalyzer C и bounded Hybrid D.
-  Bounded scope подготовлен к ручному commit и Draft PR в `main`; полная приёмка
-  исходного M6 остаётся частичной. [Checklist передачи](../plans/M06_llm_semantic_parsing.md#checklist-commit-pr).
+- Текущий milestone: `M7 — Database Inspector`; реализованы SQLite adapter и
+  normalization A, PostgreSQL reflection B, canonical fingerprint/FK graph C.
+  Подтверждённый scope: [API и примеры](../database-inspection.md),
+  [план](../plans/M07_database_inspector.md), [матрица приёмки](../plans/M07_acceptance.md).
 - `M5 — Structural Profiler и deterministic ParsePlan`:
   A (`StructuralProfiler`), B (`DeterministicStructureAnalyzer`) и C
   (`ParsePlanValidator`/`ParsePlanExecutor`) реализованы в пределах закрытой policy.
-- Активная ветка: `feat/m06-llm-semantic-parsing`; текущие изменения M6 локальные.
-  Версия package не повышалась; commit/push/PR в этой работе не выполнялись.
-- M5 подготовлен к ручному commit и PR в `main` в пределах документированной
-  policy. Актуальные checklist, состав diff, команды и незакрытые пункты:
+- Активная ветка: `feat/m07-database-inspector`, HEAD `b976282`
+  (merge M6 PR #7). Изменения M7 локальные; версия package не повышалась.
+  Commit/push/PR в текущей работе не выполнялись.
+- Исторические checklist, состав diff, команды и незакрытые пункты передачи M5:
   [подготовка M5](../plans/M05_parse_plan.md#checklist-commit-pr).
 - [Матрица приёмки M5](../plans/M05_acceptance.md) связывает критерии с tests
   и отдельно фиксирует неподдержанные/deferred сценарии.
@@ -42,7 +52,8 @@
 Фактическая policy и ограничения: [план M5](../plans/M05_parse_plan.md),
 [план M6](../plans/M06_llm_semantic_parsing.md),
 [semantic parsing API с копируемым offline-примером](../semantic-parsing.md).
-Общая SDK facade и DB mapping не считаются доступными.
+Канонические требования текущего milestone: [§9 — анализ целевой БД][spec-database]
+и [M7 — Database Inspector][spec-m7]. Общая SDK facade и DB mapping не доступны.
 
 ## Состояние milestones
 
@@ -73,7 +84,120 @@
   terminal issues. Все три исправлены с 12 regression cases.
   Незакрытых подтверждённых Critical/High/Medium в проверенном diff не осталось;
   ограничения и непроверенные сценарии сохранены в отчёте review.
-- `M7`–`M17` — не начаты.
+- `M7` — A/B/C реализованы и проверены в documented scope. Отдельные read-only
+  adapters возвращают metadata snapshot либо catalog-v1 с hash/FK graph;
+  SQLite не имитирует PostgreSQL-specific behavior. Security review исправил
+  2 Medium: raw exception context и потерю непредставимых schema semantics.
+  Финальный review исправил ещё 2 Medium: потерю domain CHECK metadata и
+  зависимость fingerprint от физических пропусков после DROP COLUMN.
+  Ограничения и непроверенные угрозы: [review M7](../plans/M07_security_review.md).
+- `M8`–`M17` — не начаты.
+
+## Подтверждённое поведение M7
+
+- `structuraguard.database` экспортирует `SQLiteTarget`, `PostgreSQLTarget`,
+  `InspectionLimits` и два concrete adapters. `inspect_metadata` возвращает
+  `DatabaseMetadataSnapshot` schema 1.1.0, `inspect` — `DatabaseCatalog` schema
+  1.1.0 с `fingerprint_version="catalog-v1"`, `database_fingerprint` и graph.
+- Scope/policy проверяются до I/O; deny имеет приоритет. Нет DDL/DML, sampling,
+  SELECT пользовательских строк, исполнения metadata expressions или LLM calls.
+  Соединения отдельные, закрываются до результата; limits/timeout/cleanup failures
+  не публикуют partial catalog. Credentials/driver context не включаются в errors.
+- Native/canonical types, nullable/default, PK/FK/unique/checks/indexes и
+  generated/non-writable columns отражены. PG поддерживает enum/domain/array,
+  identity и comments. SQLite явно имеет `comments_supported=False`;
+  `write_permissions="unknown"`, `writable` не доказывает grants.
+- Domain CHECK names/comments/validity отражены в optional `domain_constraints`
+  и fingerprint; прежний `domain_checks` сохранён. Колонки нумеруются с нуля по
+  видимому порядку: история DROP COLUMN не влияет на hash и разрешение PK/FK.
+- Pure domain functions строят versioned canonical projection и SHA-256,
+  повторно проверяют drift и строят FK graph. Hash не зависит от reflection order,
+  target/credentials/producer/данных. SCC/self-FK дают diagnostics и отсутствующий
+  load order; join hints требуют полного структурного evidence.
+- Legacy 1.0.0 JSON сохранён; pure functions требуют metadata schema 1.1.0.
+  DTO не пересчитывает объявленный hash. Нужны fresh inspection и явный
+  `verify_database_fingerprint`; это не проверка прав или защита TOCTOU.
+- Неподдержанные column selectors, внешние FK, nullable SQLite PK, virtual tables,
+  SQLite `DEFERRABLE`/`ON CONFLICT`/column `COLLATE`, PG EXCLUDE/temporal constraints,
+  foreign tables и нестандартная column/domain collation дают typed отказ.
+  View SQL definition не входит в fingerprint. Graph не выбирает стратегию
+  циклической загрузки; `execute` всегда даёт `SDK_OPERATION_NOT_IMPLEMENTED`.
+- SDK orchestration, MappingPlan validation/load, staging, dry-run и audit sink
+  этим milestone не реализованы. Native fuzzing/OS memory isolation, TLS/MITM,
+  PostgreSQL 15/17 и remote CI не подтверждены локальными tests.
+
+## Исправления финального review M7 {#m07-review-fix-checks}
+
+Два Medium finding закрыты без расширения milestone scope. Изменены только
+catalog DTO, scoped PostgreSQL domain query/normalization и canonical type
+projection, добавлены regression tests и уточнена документация. Дополнительный
+`DatabaseType.domain_constraints` использует существующий DTO constraints;
+legacy JSON без поля сохраняется, прежние SQLite golden hashes не менялись.
+Catalog с domain metadata или историей DROP COLUMN требует свежего inspection
+и повторной проверки сохранённого fingerprint, автоматической замены binding нет.
+Подробная [матрица regressions](../plans/M07_acceptance.md#m07-final-review-fixes).
+
+| Команда / проверка | Фактический результат |
+| --- | --- |
+| `pytest -q --tb=short -m database_integration .../test_m07_review_regressions.py` до исправления | **8 failed** на ожидаемых сравнениях hashes, PostgreSQL 16/18 |
+| Тот же новый файл после исправления, с `-W error::sqlalchemy.exc.SAWarning` и security cases | **14 passed** |
+| `pytest -q .../unit/database .../unit/contracts/test_database_catalog.py .../security/database` | **216 passed** |
+| `make lint typecheck` | Ruff **267 файлов**, mypy **265**, ошибок нет |
+| `make test` | **2469 passed**, 84 DB cases deselected, 5 прежних PyMuPDF/SWIG warnings |
+| `make test-integration` | **18 passed**, 2535 deselected, те же 5 warnings |
+| `make test-security` | **482 passed** |
+| `make test-database` | **84 passed**, реальные PostgreSQL 16.15/18.6, без skips и SQLAlchemy warnings |
+| `pytest -q .../unit/database/test_domain_constraints.py .../docs/test_m07_examples.py` | **19 passed**, включая обратное чтение domain DTO без нового поля и SQLite examples |
+| `make docs` | Strict build, ссылки/anchors — passed |
+| `make test-build` | wheel/sdist, offline rebuild/import/examples — **distribution verification OK** |
+| `git diff --check` | Passed |
+
+В таблице `.../` означает `packages/structuraguard/tests/`, новый PostgreSQL файл
+расположен в `integration/database/`. Применены те же локальные uv cache и Docker
+настройки, что в docs-прогоне ниже. DDL выполняют только test admin fixtures;
+inspection по-прежнему использует отдельного пользователя без SELECT на rows.
+Реальные платные LLM API не вызывались.
+
+Повторный `structuraguard-review` и security review нового diff не выявили
+существенных findings: projection сохраняет новые свойства, sorting не меняет
+пары composite keys, row/text/byte budgets и redaction распространяются на domain
+comments. Существующие tests и quality gates не ослаблялись, dependencies и
+архитектурные границы не менялись. PostgreSQL 15/17, remote CI, полный advisory
+scan и native fuzzing в этой работе не проверялись.
+
+## Проверка документации M7 {#m07-docs-checks}
+
+Публичные docstring adapters/targets, catalog DTO и pure domain API описаны
+по-русски: параметры, результат, ошибки, I/O и security ограничения. Guide
+содержит SQLite metadata/full-catalog примеры, PostgreSQL пример с отдельным
+inspector, migration note и ссылки на канонический ТЗ. Нового архитектурного
+решения не принималось; действуют ADR 0015–0017.
+
+| Команда / проверка текущего docs-шага | Фактический результат |
+| --- | --- |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs/test_m07_examples.py` | **2 passed**: SQLite metadata и полный каталог, сеть запрещена |
+| `uv run --locked --no-sync pytest -q -m database_integration packages/structuraguard/tests/integration/database/test_m07_documented_postgresql_example.py` | **2 passed**: исходный Markdown-пример на PostgreSQL 16.15/18.6 |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs` | **111 passed** |
+| Узкие `unit/database`, `unit/contracts/test_database_catalog.py`, `security/database` | **199 passed** |
+| `make lint typecheck` | Ruff: 265 файлов; mypy: 263 source files; ошибок нет |
+| `make docs` | Strict build, внутренние ссылки/anchors — passed |
+| Сравнение AST семи изменённых runtime-модулей без docstring | Исполняемая логика не изменена |
+| `git diff --check` | Passed |
+
+Первый docs build обнаружил два неверных локальных anchor; ссылки исправлены,
+strict checks сохранены. Первый PostgreSQL example run не нашёл Docker socket;
+после запуска установленного Docker Desktop оба случая прошли, без skips.
+Testcontainers использовал отдельного inspector и существующие admin fixtures;
+DSN передавался в дочерний пример через stdin. Paid LLM API не вызывались.
+
+Локальная среда: Python 3.12.9, SQLite 3.49.1, SQLAlchemy 2.0.52, asyncpg 0.31.0,
+Testcontainers 4.15.0. Использован `UV_CACHE_DIR=/private/tmp/structuraguard-m07-uv-cache`;
+для Docker — `DOCKER_CONFIG=/private/tmp/structuraguard-docker-public` и
+`DOCKER_HOST=unix:///Users/katana/.docker/run/docker.sock`.
+Новый PostgreSQL example test входит в `make test-database`; обычный docs suite
+не требует Docker. Внешний link checker не настроен; remote CI не запускался
+этим docs-шагом. Новый полный runtime suite не запускался: логика не менялась,
+результаты предыдущего полного M7 run приведены в начале страницы.
 
 ## Реализованные публичные contracts
 
@@ -86,6 +210,9 @@
   `SemanticStructureAnalyzer`, `ParsePlanValidator`, `ParsePlanExecutor`,
   `DatabaseAdapter`, `LLMProvider`, `SecurityScanner`, `StagingStore` и
   `AuditStore`.
+- M7 добавляет `DatabaseMetadataSnapshot`, descriptors типов/columns/indexes и
+  constraints, `DatabaseDependencyGraph`, SCC/FK evidence и join candidates.
+  Эти DTO не дают DB authority и не подключаются к БД при конструировании.
 - `Parser` возвращает только raw physical structure; semantic values возникают
   только после применения `ValidatedParsePlan`. DB execution принимает только
   `ValidatedMappingPlan`, связанный с catalog/target/policy fingerprints.
@@ -559,31 +686,33 @@ fix; агент commit/push/PR не выполнял. Открытые AC и rel
   вместо executable model output, source aliases и обязательный M5 validator.
 - [ADR 0014](../adr/0014-hybrid-semantic-parsing.md) — три режима, bounded document
   spans, deterministic merge/execution, confidence и preview/report semantics.
+- [ADR 0015](../adr/0015-bounded-sqlite-inspection.md) — bounded SQLite reflection,
+  read-only file connection и закрытый catalog scope.
+- [ADR 0016](../adr/0016-scoped-postgresql-inspection.md) — scoped SQLAlchemy Core
+  queries PostgreSQL вместо broad reflection, отдельная read-only transaction.
+- [ADR 0017](../adr/0017-canonical-catalog-and-dependency-graph.md) — явная
+  projection catalog-v1, version gate, pure fingerprint и FK/SCC algorithms.
 
 ## Следующий рекомендуемый шаг
 
-M6 подготовлен к ручному commit и Draft PR по [checklist](../plans/M06_llm_semantic_parsing.md#checklist-commit-pr):
-82 файла (22 tracked + 60 untracked), база `97c3154`, локальные `main`/`HEAD` совпадают.
-На шаге подготовки изменены только plan/state; commit, push и PR не создавались.
-Свежие проверки передачи: **109 docs/examples**, затем **2219 tests**, **18 integration**,
-**433 security**; lint, mypy, strict docs, lock-check и offline wheel/sdist успешны.
-Scoped audit 82 файлов не выявил признаков реальных secrets/debug/generated artifacts;
-два credential-URL совпадения — synthetic security fixtures. Все 50 ссылок на test
-functions в матрице подтверждены. Команды, состав diff и объяснения пропущенных
-проверок сохранены в checklist.
-Перед готовностью к merge закрыть K5/K7 либо явно согласовать изменение scope;
-после ручного push подтвердить remote CI на Python 3.12/3.13/3.14.
-Production PII, analyzer registry, безопасный aggregate report и router/session
-composition требуют отдельной работы;
-успех локальных tests не закрывает эти пункты. DB mapping планируется отдельно.
-Commit/push/PR этой работой не выполнялись. Остаточные проверки parser backends
-и Tika deployment остаются в [приёмке M4](../plans/M04_acceptance_audit.md).
+Перед передачей текущего M7 diff проверить [план](../plans/M07_database_inspector.md),
+[матрицу приёмки](../plans/M07_acceptance.md) и [security review](../plans/M07_security_review.md).
+После публикации ветки независимо подтвердить remote CI, включая отдельный
+PostgreSQL job. Локальная проверка не подтверждает прочие OS/DB versions.
+Commit/push/PR этой работой не выполняются. Следующие capabilities SDK требуют
+отдельных задач; наличие каталога и graph не означает готовность mapping/load.
+
+Production PII, analyzer registry, aggregate report и router/session composition
+M6 остаются за пределами M7. Исторический [checklist M6](../plans/M06_llm_semantic_parsing.md#checklist-commit-pr)
+сохранён; ограничения parser backends и Tika — в [приёмке M4](../plans/M04_acceptance_audit.md).
 
 [spec-m4]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m4-technical-parsers
 [spec-fr-014]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-014-structural-profiling-и-parseplan
 [spec-m5]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m5-structural-profiler-и-deterministic-parseplan
 [spec-fr-015]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-015-llm-assisted-semantic-parsing
 [spec-m6]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m6-llm-assisted-semantic-parsing
+[spec-database]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#9-анализ-целевой-базы-данных
+[spec-m7]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m7-database-inspector
 
 ## Проверка документации M6 {#m06-docs-checks}
 

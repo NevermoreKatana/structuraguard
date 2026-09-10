@@ -26,7 +26,7 @@ _ALLOWED_EXTERNAL_ROOTS = {
             "unicodedata",
         }
     ),
-    "domain": frozenset({"__future__", "hashlib"}),
+    "domain": frozenset({"__future__", "collections", "hashlib", "heapq", "typing"}),
     "ports": frozenset({"__future__", "collections", "dataclasses", "typing"}),
 }
 
@@ -35,6 +35,9 @@ def _assert_import_allowed(layer: str, module: str, source_file: Path) -> None:
     if module.startswith(f"structuraguard.{layer}"):
         return
     if layer in {"domain", "ports"} and module.startswith("structuraguard.contracts"):
+        return
+    # ADR 0017: общий typed error contract не является infrastructure/facade.
+    if layer == "domain" and module == "structuraguard.exceptions":
         return
     root = module.partition(".")[0]
     assert root in _ALLOWED_EXTERNAL_ROOTS[layer], (
@@ -84,6 +87,36 @@ def test_relative_import_cannot_escape_contract_layer() -> None:
             imported,
             PACKAGE_ROOT / "contracts" / "example.py",
         )
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "structuraguard.database",
+        "structuraguard.sdk",
+        "sqlalchemy",
+        "asyncpg",
+        "os",
+        "socket",
+        "subprocess",
+    ],
+)
+def test_domain_still_rejects_infrastructure_and_io(module: str) -> None:
+    with pytest.raises(AssertionError):
+        _assert_import_allowed(
+            "domain", module, PACKAGE_ROOT / "domain/database_graph.py"
+        )
+
+
+def test_shared_errors_depend_only_on_contracts_and_pure_stdlib() -> None:
+    source = PACKAGE_ROOT / "exceptions.py"
+    for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            for imported in node.names:
+                _assert_import_allowed("contracts", imported.name, source)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.level == 0
+            _assert_import_allowed("contracts", node.module or "", source)
 
 
 def test_m2_contract_layers_contain_no_dynamic_execution_primitives() -> None:

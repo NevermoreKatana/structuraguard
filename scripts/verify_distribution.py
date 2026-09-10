@@ -57,6 +57,16 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/structure/text_sources.py",
         "structuraguard/structure/semantic_request.py",
         "structuraguard/contracts/llm.py",
+        "structuraguard/database/__init__.py",
+        "structuraguard/database/sqlite.py",
+        "structuraguard/database/target.py",
+        "structuraguard/database/normalization.py",
+        "structuraguard/database/_inspection.py",
+        "structuraguard/database/_catalog.py",
+        "structuraguard/database/_sqlite_sql.py",
+        "structuraguard/database/postgresql.py",
+        "structuraguard/database/_postgresql_catalog.py",
+        "structuraguard/database/_postgresql_queries.py",
         "structuraguard/contracts/semantic.py",
         "structuraguard/contracts/mapping.py",
         "structuraguard/contracts/normalized.py",
@@ -67,6 +77,9 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/contracts/structure.py",
         "structuraguard/domain/__init__.py",
         "structuraguard/domain/canonical.py",
+        "structuraguard/domain/_database_catalog.py",
+        "structuraguard/domain/database_fingerprint.py",
+        "structuraguard/domain/database_graph.py",
         "structuraguard/domain/lineage.py",
         "structuraguard/exceptions.py",
         "structuraguard/llm/__init__.py",
@@ -162,7 +175,19 @@ _CONTRACT_EXPORTS = frozenset(
         "BytesScalar",
         "CatalogColumnRef",
         "ColumnCatalog",
+        "ColumnInspectionMetadata",
+        "ConstraintInspectionMetadata",
+        "DatabaseMetadataSnapshot",
+        "DatabaseType",
+        "ForeignKeyInspectionMetadata",
+        "IndexCatalog",
+        "IndexKeyCatalog",
+        "TableInspectionMetadata",
         "CssSelectorLocation",
+        "DatabaseDependencyCycle",
+        "DatabaseDependencyGraph",
+        "ForeignKeyDependency",
+        "JoinTableCandidate",
         "DatabaseCatalog",
         "DatabaseInspectionRequest",
         "DataClassification",
@@ -321,6 +346,10 @@ _CONTRACT_EXPORTS = frozenset(
 _DOMAIN_EXPORTS = frozenset(
     {
         "batch_sequence_is_contiguous",
+        "canonical_database_catalog",
+        "database_fingerprint",
+        "verify_database_fingerprint",
+        "build_dependency_graph",
         "canonical_json",
         "references_belong_to_extraction",
         "sha256_fingerprint",
@@ -409,6 +438,7 @@ _BUILTIN_PARSER_EXPORTS = frozenset(
     }
 )
 _OPTIONAL_DEPENDENCIES = {
+    "sqlite": frozenset({"sqlalchemy"}),
     "xml": frozenset({"defusedxml"}),
     "yaml": frozenset({"pyyaml"}),
     "postgres": frozenset({"sqlalchemy", "asyncpg", "psycopg"}),
@@ -1496,6 +1526,7 @@ def _probe_source(
             raise SystemExit(f"missing top-level exports: {{missing}}")
 
         import structuraguard.contracts as contracts
+        import structuraguard.database as database
         import structuraguard.llm as llm
         import structuraguard.domain as domain
         import structuraguard.parsers as parsers
@@ -1504,6 +1535,11 @@ def _probe_source(
         import structuraguard.ports as ports
         import structuraguard.structure as structure
         import structuraguard.parsing as semantic_parsing
+
+        if set(database.__all__) != {{"InspectionLimits", "SQLiteDatabaseAdapter", "SQLiteTarget", "PostgreSQLDatabaseAdapter", "PostgreSQLTarget"}}:
+            raise SystemExit("unexpected database exports")
+        if "sqlalchemy" in sys.modules:
+            raise SystemExit("database import must not require SQLAlchemy")
 
         if set(llm.__all__) != {{"FakeLLMProvider", "NoLLMProvider", "ScriptedFailure", "ScriptedResponse", "LLMPromptTemplate", "LLMResponseSchema", "OpenAICompatibleConfig", "OpenAICompatibleHeader", "OpenAICompatibleProvider", "PolicyAwareLLMRouter"}}:
             raise SystemExit("unexpected LLM exports")

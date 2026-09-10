@@ -24,7 +24,7 @@ def test_ci_enforces_locked_read_only_m01_quality_gates() -> None:
     assert re.search(r"(?i)\bsecrets\b", workflow) is None
     assert re.search(r"(?m)^\s+[a-z-]+:\s+write\s*$", workflow) is None
     assert "write-all" not in workflow
-    assert workflow.count("persist-credentials: false") == 3
+    assert workflow.count("persist-credentials: false") == 4
 
     action_references = re.findall(r"(?m)^\s+uses:\s+(\S+)", workflow)
     assert action_references
@@ -50,3 +50,13 @@ def test_ci_enforces_locked_read_only_m01_quality_gates() -> None:
     assert "uv lock --check" in package
     assert "uv sync --all-packages --locked --group dev" in package
     assert "make test-build" in package
+
+    database = _job_body(workflow, "database")
+    assert 'python-version: "3.12"' in database
+    assert "uv lock --check" in database
+    assert (
+        "uv sync --all-packages --locked --group dev --extra postgres --extra sqlite"
+        in database
+    )
+    assert "docker info" in database
+    assert "make test-database" in database

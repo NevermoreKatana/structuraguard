@@ -2,7 +2,7 @@ UV ?= uv
 RUN = $(UV) run --locked --no-sync
 PYTHON_PATHS = packages/structuraguard/src packages/structuraguard/tests scripts
 
-.PHONY: sync lock-check format lint typecheck test test-integration test-security docs build test-build check
+.PHONY: sync lock-check format lint typecheck test test-integration test-database test-security docs build test-build check
 
 sync:
 	$(UV) lock --check
@@ -26,7 +26,10 @@ test:
 	$(RUN) pytest
 
 test-integration:
-	$(RUN) pytest -m integration
+	$(RUN) pytest -m 'integration and not database_integration'
+
+test-database:
+	$(RUN) pytest -W error::sqlalchemy.exc.SAWarning -m database_integration packages/structuraguard/tests/integration/database
 
 test-security:
 	$(RUN) pytest packages/structuraguard/tests/security
