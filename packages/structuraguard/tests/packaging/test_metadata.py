@@ -13,6 +13,7 @@ SOURCE_PACKAGE = PACKAGE_ROOT / "src" / "structuraguard"
 
 EXPECTED_EXTRAS = frozenset(
     {
+        "sqlite",
         "postgres",
         "pdf",
         "excel",
@@ -26,6 +27,7 @@ EXPECTED_EXTRAS = frozenset(
     }
 )
 EXPECTED_EXTRA_PACKAGES: Mapping[str, frozenset[str]] = {
+    "sqlite": frozenset({"sqlalchemy"}),
     "xml": frozenset({"defusedxml"}),
     "yaml": frozenset({"pyyaml"}),
     "postgres": frozenset({"sqlalchemy", "asyncpg", "psycopg"}),

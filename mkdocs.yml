@@ -44,6 +44,7 @@ nav:
   - Требования: requirements.md
   - Архитектура: architecture.md
   - Публичный API: public-api.md
+  - Database Inspector M7: database-inspection.md
   - Структурный разбор M5: structure.md
   - LLM providers и routing M6: llm.md
   - LLM semantic parsing M6: llm-semantic-parsing.md
@@ -65,6 +66,9 @@ nav:
       - HTTP provider и policy-aware routing: adr/0012-policy-aware-llm-routing.md
       - Проверка LLM ParsePlan: adr/0013-validated-llm-structure-analysis.md
       - Hybrid parsing и document spans: adr/0014-hybrid-semantic-parsing.md
+      - Ограниченный SQLite inspection: adr/0015-bounded-sqlite-inspection.md
+      - PostgreSQL inspection в пределах scope: adr/0016-scoped-postgresql-inspection.md
+      - Canonical catalog и FK graph: adr/0017-canonical-catalog-and-dependency-graph.md
   - Планы:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
@@ -77,3 +81,4 @@ nav:
       - M05 — аудит приёмки: plans/M05_acceptance.md
       - M05 — security review: plans/M05_security_review.md
       - M06 — LLM semantic parsing: plans/M06_llm_semantic_parsing.md
+      - M07 — Database Inspector: plans/M07_database_inspector.md

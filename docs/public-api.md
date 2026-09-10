@@ -1409,3 +1409,68 @@ router M6-B не подставляется вместо конкретного 
 
 [spec-fr-015]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-015-llm-assisted-semantic-parsing
 [spec-m6]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m6-llm-assisted-semantic-parsing
+
+## SQLiteDatabaseAdapter M7-A
+
+Канонические требования: [анализ целевой БД][spec-database] и [M7][spec-m7].
+Здесь описан подтверждённый inspection API; facade, mapping и loader не готовы.
+
+`structuraguard.database` экспортирует `SQLiteTarget`, `InspectionLimits` и
+`SQLiteDatabaseAdapter`. Async `inspect_metadata(DatabaseInspectionRequest)`
+возвращает `DatabaseMetadataSnapshot` schema `1.1.0` после завершения read-only
+transaction и cleanup. Snapshot использует существующие catalog DTO с optional
+`inspection` metadata; legacy JSON без этих полей сохраняется.
+
+`inspect_metadata` сохраняет API части A без fingerprint. Полный
+`DatabaseAdapter.inspect` реализован в M7-C; общая SDK facade пока не подключена. Scope,
+read-only controls, пример и коды ошибок:
+[SQLite inspection](database-inspection.md),
+[ADR 0015](adr/0015-bounded-sqlite-inspection.md).
+
+## PostgreSQLDatabaseAdapter M7-B
+
+`structuraguard.database` также экспортирует `PostgreSQLTarget` и
+`PostgreSQLDatabaseAdapter`. Установите `structuraguard[postgres]`; SQLAlchemy
+использует `asyncio` extra. Отдельный inspector DSN (`SecretStr`) принадлежит
+trusted target, scope задаётся schemas и точными парами `(schema, table)`.
+
+`inspect_metadata(DatabaseInspectionRequest)` возвращает тот же snapshot после
+read-only transaction и cleanup. Поддержаны native types, enum/domain/array,
+identity/generated, PK/FK/unique/checks, indexes, comments и materialized views.
+Comments с inspection metadata сохраняются дословно, включая CR/LF/TAB;
+credential canaries и остальные controls отклоняются. Произвольные PII могут
+оставаться в metadata. `DATABASE_PERMISSION_DENIED` обозначает недостаточные права или
+ошибку аутентификации; DSN/driver exception наружу не выходят.
+
+Полный `inspect` добавлен в M7-C; `execute` явно возвращает
+`SDK_OPERATION_NOT_IMPLEMENTED`.
+Пример, limits и ограничения: [PostgreSQL inspection](database-inspection.md#postgresql-m7-b),
+[ADR 0016](adr/0016-scoped-postgresql-inspection.md).
+
+
+## DatabaseCatalog, fingerprint и graph M7-C
+
+`SQLiteDatabaseAdapter.inspect` и `PostgreSQLDatabaseAdapter.inspect` возвращают
+`DatabaseCatalog` schema `1.1.0` с `fingerprint_version="catalog-v1"`,
+`database_fingerprint`, `comments_supported`, `dependency_graph`. Metadata API
+и legacy catalog wire format сохраняются. `execute` не открывает соединений
+и не потребляет batches.
+
+Domain API: `canonical_database_catalog`, `database_fingerprint`,
+`verify_database_fingerprint`, `build_dependency_graph`. Hash исключает runtime
+binding, права и derived graph. Caller получает свежий snapshot и передаёт его
+в `verify_database_fingerprint`; несовпадение даёт `DATABASE_SCHEMA_DRIFT`.
+DTO сам не пересчитывает заявленный hash. Graph DTO: `DatabaseDependencyGraph`,
+`ForeignKeyDependency`, `DatabaseDependencyCycle`, `JoinTableCandidate`.
+Циклы и self-FK требуют explicit strategy; `load_order=None`. Join hints
+требуют полного structural evidence. Подробности и executable example:
+[Database Inspector](database-inspection.md#fingerprint-dependency-graph-m7-c),
+[ADR 0017](adr/0017-canonical-catalog-and-dependency-graph.md).
+
+Непредставимые SQLite clauses и PostgreSQL column/domain collation дают
+`DATABASE_METADATA_UNSUPPORTED` до публикации. Legacy 1.0.0 сохраняет JSON,
+но не принимается новыми pure functions как metadata snapshot.
+[Совместимость и переход](database-inspection.md#m07-catalog-migration).
+
+[spec-database]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#9-анализ-целевой-базы-данных
+[spec-m7]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m7-database-inspector

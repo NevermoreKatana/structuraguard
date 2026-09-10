@@ -12,6 +12,9 @@ members = ["packages/structuraguard"]
 
 [dependency-groups]
 dev = [
+    "SQLAlchemy[asyncio]>=2.0.40,<3",
+    "asyncpg>=0.30,<1",
+    "testcontainers[postgres]>=4.15,<5",
     "httpx>=0.28.1,<1",
     "openpyxl>=3.1.5,<4",
     "python-docx>=1.1.2,<2",
@@ -27,6 +30,7 @@ dev = [
     "mypy>=2.3,<3",
     "pytest>=8.4,<10",
     "ruff>=0.14,<1",
+    "asyncpg-stubs>=0.31,<1",
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -69,7 +73,10 @@ warn_unreachable = true
 pretty = true
 
 [tool.pytest.ini_options]
-addopts = "--strict-config --strict-markers"
+addopts = "--strict-config --strict-markers -m 'not database_integration'"
 testpaths = ["packages/structuraguard/tests"]
 xfail_strict = true
-markers = ["integration: реальные document backends и локальный fake HTTP server"]
+markers = [
+    "integration: реальные backends и локальный fake HTTP server",
+    "database_integration: PostgreSQL через Testcontainers; требует Docker",
+]
