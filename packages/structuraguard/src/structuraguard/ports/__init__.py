@@ -8,6 +8,7 @@ from structuraguard.ports.semantic import (
     ParsePlanExecutor,
     ParsePlanValidator,
     SemanticStructureAnalyzer,
+    StructuralProfiler,
 )
 from structuraguard.ports.stores import AuditStore, StagingStore
 
@@ -21,4 +22,5 @@ __all__ = (
     "SecurityScanner",
     "SemanticStructureAnalyzer",
     "StagingStore",
+    "StructuralProfiler",
 )

@@ -3,12 +3,15 @@ from __future__ import annotations
 import io
 import runpy
 import tarfile
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from types import FunctionType, SimpleNamespace
 from typing import Protocol, cast
 
 import pytest
+
+from structuraguard import ports, structure
 
 VERIFIER_PATH = Path(__file__).resolve().parents[4] / "scripts/verify_distribution.py"
 REPOSITORY_ROOT = VERIFIER_PATH.parents[1]
@@ -53,6 +56,42 @@ verify_installed_wheel = cast(
     VerifyInstalledWheel,
     verify_installed_wheel_function,
 )
+
+
+def test_distribution_manifest_covers_current_package_sources() -> None:
+    source_root = REPOSITORY_ROOT / "packages/structuraguard/src"
+    package_root = source_root / "structuraguard"
+    expected = {
+        path.relative_to(source_root).as_posix() for path in package_root.rglob("*.py")
+    } | {"structuraguard/py.typed"}
+    assert VERIFIER_NAMESPACE["_PACKAGE_FILES"] == expected
+
+
+@pytest.mark.parametrize(
+    ("key", "exports"),
+    [("_PORT_EXPORTS", ports.__all__), ("_STRUCTURE_EXPORTS", structure.__all__)],
+)
+def test_distribution_smoke_covers_m05_public_exports(
+    key: str, exports: tuple[str, ...]
+) -> None:
+    assert VERIFIER_NAMESPACE.get(key) == frozenset(exports)
+
+
+@pytest.mark.parametrize(
+    "unexpected",
+    ["structuraguard/structure/debug.py", "structuraguard/structure/tmp.txt"],
+)
+def test_wheel_allowlist_still_rejects_unexpected_files(
+    tmp_path: Path, unexpected: str
+) -> None:
+    wheel = tmp_path / "structuraguard-0.3.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name in ("METADATA", "WHEEL", "RECORD"):
+            archive.writestr(f"structuraguard-0.3.0.dist-info/{name}", b"")
+        archive.writestr(unexpected, b"inert test payload")
+    verify_wheel = cast(Callable[[Path], object], VERIFIER_NAMESPACE["_verify_wheel"])
+    with pytest.raises(VerificationError, match="неожиданные wheel contents"):
+        verify_wheel(wheel)
 
 
 def test_sdist_member_limit_is_applied_during_streaming_read(tmp_path: Path) -> None:

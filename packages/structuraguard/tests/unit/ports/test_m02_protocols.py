@@ -26,6 +26,7 @@ _PORT_EXPORTS = frozenset(
         "SecurityScanner",
         "SemanticStructureAnalyzer",
         "StagingStore",
+        "StructuralProfiler",
     }
 )
 

@@ -4,11 +4,11 @@ StructuraGuard — встраиваемая Python-библиотека для �
 разнородных данных в существующие реляционные БД. Основной API асинхронный, а
 sync API предоставляется отдельной facade.
 
-## Доступность в M4
+## Доступность в M5
 
-M4 добавляет независимые technical parsers к contracts M2 и instance-local
-registry M3. Начните с [копируемого офлайн-примера физического извлечения](
-public-api.md#m4-extraction-copyable-example). Публично доступны:
+M5 добавляет structural profiling, deterministic analyzer и проверяемое execution
+ParsePlan поверх technical parsers M4. Начните с [копируемого офлайн-примера
+CSV → NormalizedBatch](structure.md). Публично доступны:
 
 - immutable `SDKConfig`, который принимает только явные значения и не
   использует environment как источник config;
@@ -18,7 +18,7 @@ public-api.md#m4-extraction-copyable-example). Публично доступны
 - machine-readable поле `error_code`;
 - frozen DTO физической модели `Extracted*`, декларативного `ParsePlan`,
   семантической модели `Normalized*`, `DatabaseCatalog`, `MappingPlan` и reports;
-- девять adapter protocols в `structuraguard.ports`, включая `Parser`,
+- десять adapter protocols в `structuraguard.ports`, включая `Parser`,
   `SemanticStructureAnalyzer`, `ParsePlanExecutor`, `DatabaseAdapter` и
   provider-neutral `LLMProvider`;
 - `ParserRegistry` и связанные selection/discovery contracts через
@@ -30,21 +30,25 @@ public-api.md#m4-extraction-copyable-example). Публично доступны
 - явно регистрируемые TXT/LOG/MD, CSV/TSV, JSON/JSONL/NDJSON, XML/HTML/YAML,
   XLSX, text-layer PDF и DOCX adapters в `structuraguard.parsers.builtin`;
 - отдельный optional `TikaParserAdapter`, выключенный по умолчанию, с явным
-  endpoint, source-bound egress approval и изоляцией сервера силами caller.
+  endpoint, source-bound egress approval и изоляцией сервера силами caller;
+- `StructuralProfiler`, `DeterministicStructureAnalyzer`, `ParsePlanValidator`
+  и `ParsePlanExecutor` через `structuraguard.structure`, с bounded options,
+  evidence, явной неоднозначностью и physical provenance.
 
 Обычный `import structuraguard` не загружает Pydantic: lazy top-level exports
 подгружают `SDKConfig` и facade только при явном обращении к этим
 символам. Код StructuraGuard не читает environment.
 
 Format adapters возвращают физические `ExtractedBatch`, не окончательные
-бизнес-сущности. Semantic services, DB/LLM adapters и orchestrator не
-реализованы. Вызов
+бизнес-сущности. Executor M5 создаёт normalized records/entities, но business
+meaning остаётся `unresolved`. DB/LLM adapters и orchestrator не реализованы. Вызов
 операции facade завершается контролируемой ошибкой
 `SDK_OPERATION_NOT_IMPLEMENTED`; это не успешный placeholder. Sync-вызов внутри
 активного event loop завершается `SYNC_API_IN_ASYNC_CONTEXT`.
 
 Contracts доступны через `structuraguard.contracts`, `structuraguard.ports` и
-`structuraguard.parsers`; корневые exports M1 не расширены. Создание facade и
+`structuraguard.parsers`; сервисы M5 — через `structuraguard.structure`.
+Корневые exports M1 не расширены. Создание facade и
 registry не сканирует installed distributions: discovery начинается только по
 явному вызову с allowlist policy. Подробнее см.
 [публичный API](public-api.md#m4-technical-parsers).
@@ -56,6 +60,10 @@ Document workers поддерживают Linux/macOS и не являются s
 [аудите M4](plans/M04_acceptance_audit.md) и
 [состоянии проекта](codex/PROJECT_STATE.md).
 
+M5 поддерживает закрытую policy четырёх семейств; это не произвольные expressions,
+semantic conversions или автоматический выбор неоднозначной структуры. Границы:
+[приёмка M5](plans/M05_acceptance.md) и [security semantics](security.md).
+
 Копируемые сценарии M3 показаны в примерах
 [manual registration и selection](public-api.md#m3-registry-copyable-example) и
 [descriptor-only discovery](public-api.md#m3-discovery-copyable-example). Они не
@@ -66,6 +74,7 @@ Document workers поддерживают Linux/macOS и не являются s
 - [Требования](requirements.md) задают нормативный scope и критерии приёмки.
 - [Архитектура](architecture.md) фиксирует границы и направление зависимостей.
 - [Публичный API](public-api.md) различает доступный scaffold и целевой contract.
+- [Структурный разбор M5](structure.md) показывает исполняемый пример и ограничения.
 - [Модель угроз](threat-model.md) описывает trust boundaries и controls.
 
 ## Проверки

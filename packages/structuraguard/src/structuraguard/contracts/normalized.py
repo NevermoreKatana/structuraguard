@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Self
+from typing import Annotated, Self
 
-from pydantic import StrictBool, model_validator
+from pydantic import Field, StrictBool, model_validator
 
-from structuraguard.contracts._base import FrozenContract
+from structuraguard.contracts._base import FrozenContract, canonical_sha256_value
 from structuraguard.contracts.common import (
     BatchFingerprint,
     FingerprintStr,
@@ -20,6 +20,7 @@ from structuraguard.contracts.common import (
     SchemaVersionStr,
     SourceArtifactRef,
 )
+from structuraguard.contracts.execution import PhysicalValueOrigin, SelectionTrace
 
 
 def _reject_duplicate_refs(refs: tuple[PhysicalSourceRef, ...], *, field: str) -> None:
@@ -38,9 +39,29 @@ class NormalizedValue(FrozenContract):
     source_refs: tuple[PhysicalSourceRef, ...]
     transformations: tuple[IdentifierStr, ...] = ()
     issue_codes: tuple[IdentifierStr, ...] = ()
+    origins: Annotated[tuple[PhysicalValueOrigin, ...], Field(max_length=64)] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    selection: SelectionTrace | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def _validate_value(self) -> Self:
+        if bool(self.origins) != (self.selection is not None):
+            raise ValueError("origins и selection указываются вместе")
+        if any(origin.source_ref not in self.source_refs for origin in self.origins):
+            raise ValueError("origins выходят за physical provenance")
+        if len({origin.source_ref for origin in self.origins}) != len(self.origins):
+            raise ValueError("origins должны быть уникальны")
+        if self.selection is not None:
+            operation = self.selection.operation.value
+            if self.transformations != (() if operation == "copy" else (operation,)):
+                raise ValueError("transformations не совпадают с selection")
+            if operation == "copy" and (
+                len(self.origins) != 1 or self.raw_value != self.origins[0].raw_value
+            ):
+                raise ValueError("copy не соответствует physical raw value")
         if not self.source_refs:
             raise ValueError("normalized value требует physical provenance")
         _reject_duplicate_refs(self.source_refs, field="source_refs")
@@ -233,6 +254,18 @@ class NormalizedDatasetManifest(FrozenContract):
 
     @model_validator(mode="after")
     def _validate_manifest(self) -> Self:
+        if self.schema_version not in {"1.0.0", "1.1.0"}:
+            raise ValueError("неподдерживаемая версия NormalizedDatasetManifest")
+        if self.schema_version == "1.1.0":
+            expected = canonical_sha256_value(
+                self, exclude_top_level=frozenset({"normalized_fingerprint"})
+            )
+            if self.normalized_fingerprint == "sha256:" + "0" * 64:
+                object.__setattr__(self, "normalized_fingerprint", expected)
+            elif self.normalized_fingerprint != expected:
+                raise ValueError(
+                    "normalized manifest fingerprint не совпадает с payload"
+                )
         indices = tuple(batch.batch_index for batch in self.batches)
         if not indices or indices != tuple(range(len(indices))):
             raise ValueError("normalized batches должны образовывать диапазон от нуля")
@@ -294,7 +327,47 @@ class NormalizedDatasetManifest(FrozenContract):
         )
 
     def validate_batch(self, batch: NormalizedBatch) -> None:
-        """Сверить один normalized batch с lineage и schema manifest."""
+        """Сверить один normalized batch с lineage, schema и hashes manifest.
+
+        Args:
+            batch: Batch, который должен принадлежать этому manifest.
+
+        Returns:
+            None при согласованном batch; полный stream этим не подтверждается.
+
+        Raises:
+            ValueError: Не совпали version, fingerprint, summary, terminal marker
+                либо semantic schema.
+
+        Для schema 1.1.0 перепроверяются payload hashes manifest и batch, в том
+        числе после model_copy. Legacy 1.0.0 не обещает проверяемые hashes.
+        Объекты не меняются, I/O нет; hash не удостоверяет подлинность source.
+        """
+
+        self._verify_fingerprint()
+        self._validate_bound_batch(batch)
+
+    def _verify_fingerprint(self) -> None:
+        if (
+            self.schema_version == "1.1.0"
+            and canonical_sha256_value(
+                self, exclude_top_level=frozenset({"normalized_fingerprint"})
+            )
+            != self.normalized_fingerprint
+        ):
+            raise ValueError("normalized manifest fingerprint не совпадает с payload")
+
+    def _validate_bound_batch(self, batch: NormalizedBatch) -> None:
+        if batch.schema_version != self.schema_version:
+            raise ValueError("normalized schema versions не совпадают")
+        if (
+            self.schema_version == "1.1.0"
+            and canonical_sha256_value(
+                batch, exclude_top_level=frozenset({"batch_fingerprint", "manifest"})
+            )
+            != batch.batch_fingerprint
+        ):
+            raise ValueError("normalized batch payload изменён")
 
         if batch.batch_index >= len(self.batches):
             raise ValueError("Normalized batch отсутствует в manifest sequence")
@@ -320,8 +393,26 @@ class NormalizedDatasetManifest(FrozenContract):
             raise ValueError("Normalized batch не согласован с semantic schema")
 
     def validate_batches(self, batches: Iterable[NormalizedBatch]) -> None:
-        """Проверить stream, включая глобальную уникальность semantic IDs."""
+        """Проверить весь normalized stream и глобальную уникальность semantic IDs.
 
+        Args:
+            batches: Полная sync последовательность от batch_index=0 до terminal.
+
+        Returns:
+            None после успешной проверки всего stream.
+
+        Raises:
+            ValueError: Неверны manifest/batch hashes schema 1.1.0, порядок,
+                counts, lineage/schema либо уникальность record/entity/value IDs.
+
+        Iterator потребляется без удержания raw batches. Множества IDs растут
+        с числом records/entities/values; для большого output нужен бюджет caller.
+        Hash manifest считается один раз. Метод не пишет данные, не закрывает
+        iterator caller и не заменяет downstream staging/rollback.
+        """
+
+        # Один hash manifest на проход; повторять его для каждого batch — O(B²).
+        self._verify_fingerprint()
         record_ids: set[str] = set()
         entity_ids: set[str] = set()
         value_ids: set[str] = set()
@@ -336,7 +427,7 @@ class NormalizedDatasetManifest(FrozenContract):
                 )
             if batch.batch_index != expected_index:
                 raise ValueError("Порядок normalized batches не совпадает с manifest")
-            self.validate_batch(batch)
+            self._validate_bound_batch(batch)
             batch_count += 1
             for record in batch.records:
                 if record.record_id in record_ids:
@@ -380,6 +471,31 @@ class NormalizedBatch(FrozenContract):
 
     @model_validator(mode="after")
     def _validate_batch(self) -> Self:
+        if self.schema_version not in {"1.0.0", "1.1.0"}:
+            raise ValueError("неподдерживаемая версия NormalizedBatch")
+        if self.schema_version == "1.1.0":
+            expected = canonical_sha256_value(
+                self, exclude_top_level=frozenset({"batch_fingerprint", "manifest"})
+            )
+            if self.batch_fingerprint == "sha256:" + "0" * 64:
+                object.__setattr__(self, "batch_fingerprint", expected)
+            elif self.batch_fingerprint != expected:
+                raise ValueError("normalized batch fingerprint не совпадает с payload")
+            if any(
+                origin.location.source != self.source
+                for record in self.records
+                for entity in record.entities
+                for value in entity.values
+                for origin in value.origins
+            ):
+                raise ValueError("origin location относится к другому source")
+        elif any(
+            value.origins
+            for record in self.records
+            for entity in record.entities
+            for value in entity.values
+        ):
+            raise ValueError("точные origins требуют normalized schema 1.1.0")
         if self.is_last != (self.manifest is not None):
             raise ValueError("только terminal batch должен содержать manifest")
         if len({record.record_id for record in self.records}) != len(self.records):

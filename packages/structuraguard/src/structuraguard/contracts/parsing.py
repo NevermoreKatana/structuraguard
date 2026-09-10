@@ -8,6 +8,13 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, StrictBool, WrapValidator, model_validator
 
 from structuraguard.contracts._base import FrozenContract, canonical_sha256_value
+from structuraguard.contracts.analysis import (
+    AnalysisScore,
+    ExplicitRecordGrouping,
+    LogRecordSelector,
+    PlanDerivation,
+    TreeStep,
+)
 from structuraguard.contracts.common import (
     ConfidenceDecimal,
     FingerprintStr,
@@ -30,6 +37,14 @@ from structuraguard.contracts.common import (
     _redact_union_validation_input,
 )
 from structuraguard.contracts.source import ExtractedDatasetManifest, SourceLocation
+from structuraguard.contracts.structure import (
+    DocumentObservation,
+    FieldObservation,
+    ProfileCoverage,
+    TabularObservation,
+    TextObservation,
+    TreeObservation,
+)
 
 _AUTO_FINGERPRINT = "sha256:" + "0" * 64
 _FINGERPRINT_FIELDS = frozenset({"fingerprint"})
@@ -120,7 +135,12 @@ StructureObservation = Annotated[
     TabularShapeObservation
     | TreeShapeObservation
     | LogShapeObservation
-    | DocumentShapeObservation,
+    | DocumentShapeObservation
+    | TabularObservation
+    | TreeObservation
+    | TextObservation
+    | DocumentObservation
+    | FieldObservation,
     Field(discriminator="kind"),
     WrapValidator(_redact_union_validation_input),
 ]
@@ -129,6 +149,15 @@ StructureObservation = Annotated[
 def _observation_refs(
     observation: StructureObservation,
 ) -> tuple[PhysicalSourceRef, ...]:
+    if isinstance(
+        observation,
+        TabularObservation
+        | TreeObservation
+        | TextObservation
+        | DocumentObservation
+        | FieldObservation,
+    ):
+        return observation.source_refs
     if isinstance(observation, TabularShapeObservation):
         return (observation.table_ref,)
     if isinstance(observation, TreeShapeObservation):
@@ -167,9 +196,22 @@ class StructureCandidate(FrozenContract):
     confidence: ConfidenceDecimal
     evidence: tuple[PhysicalSourceRef, ...]
     rationale_codes: tuple[IdentifierStr, ...] = ()
+    observation_ids: Annotated[tuple[IdentifierStr, ...], Field(max_length=64)] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+    )
+
+    assessment: AnalysisScore | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def _validate_evidence(self) -> Self:
+        if self.assessment is not None and (
+            self.assessment.confidence != self.confidence
+            or self.assessment.observation_ids != self.observation_ids
+        ):
+            raise ValueError("candidate assessment не согласован с evidence/score")
         if not self.evidence:
             raise ValueError("structure candidate требует physical evidence")
         _reject_duplicate_refs(self.evidence, field="evidence")
@@ -177,6 +219,8 @@ class StructureCandidate(FrozenContract):
             raise ValueError("structure candidate смешивает extraction runs")
         if len(self.rationale_codes) != len(set(self.rationale_codes)):
             raise ValueError("rationale_codes должны быть уникальны")
+        if len(self.observation_ids) != len(set(self.observation_ids)):
+            raise ValueError("Candidate observation IDs должны быть уникальны")
         return self
 
 
@@ -192,16 +236,79 @@ class StructureProfile(FrozenContract):
     evidence: tuple[PhysicalSourceRef, ...]
     observations: tuple[StructureEvidence, ...]
     candidates: tuple[StructureCandidate, ...] = ()
+    coverage: ProfileCoverage | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def _validate_profile(self) -> Self:
-        if not self.evidence or not self.observations:
+        if self.schema_version not in {"1.0.0", "1.1.0"}:
+            raise ValueError("Неподдерживаемая версия structural profile")
+        if self.schema_version == "1.0.0" and self.coverage is not None:
+            raise ValueError("Coverage требует profile schema 1.1.0")
+        if self.schema_version == "1.0.0" and any(
+            candidate.observation_ids for candidate in self.candidates
+        ):
+            raise ValueError("Candidate observation links требуют profile schema 1.1.0")
+        if self.schema_version == "1.0.0" and any(
+            isinstance(
+                item.observation,
+                TabularObservation
+                | TreeObservation
+                | TextObservation
+                | DocumentObservation
+                | FieldObservation,
+            )
+            for item in self.observations
+        ):
+            raise ValueError("Подробные observations требуют profile schema 1.1.0")
+        if self.schema_version == "1.1.0":
+            if self.coverage is None:
+                raise ValueError("Profile 1.1.0 требует coverage")
+            if (
+                len(self.evidence) > 10_000
+                or len(self.observations) > 2048
+                or len(self.candidates) > 32
+            ):
+                raise ValueError("Profile превышает structural hard caps")
+            expected = canonical_sha256_value(
+                self,
+                exclude_top_level=frozenset({"profile_fingerprint"}),
+            )
+            if self.profile_fingerprint == _AUTO_FINGERPRINT:
+                object.__setattr__(self, "profile_fingerprint", expected)
+            elif self.profile_fingerprint != expected:
+                raise ValueError("Profile fingerprint не соответствует payload")
+        if (not self.evidence or not self.observations) and not (
+            self.schema_version == "1.1.0"
+            and not self.evidence
+            and not self.observations
+            and not self.candidates
+        ):
             raise ValueError("structure profile требует typed observations")
         _reject_duplicate_refs(self.evidence, field="evidence")
         if len({item.evidence_id for item in self.observations}) != len(
             self.observations
         ):
             raise ValueError("evidence_id должны быть уникальны")
+        if self.schema_version == "1.1.0":
+            observations_by_id = {item.evidence_id: item for item in self.observations}
+            for candidate in self.candidates:
+                if not candidate.observation_ids or any(
+                    identifier not in observations_by_id
+                    for identifier in candidate.observation_ids
+                ):
+                    raise ValueError("Candidate требует связанные observations")
+                linked_refs = {
+                    ref
+                    for identifier in candidate.observation_ids
+                    for ref in observations_by_id[identifier].source_refs
+                }
+                if not set(candidate.evidence) <= linked_refs:
+                    raise ValueError(
+                        "Candidate evidence выходит за связанные observations"
+                    )
         observed_refs = {
             ref for observation in self.observations for ref in observation.source_refs
         }
@@ -286,6 +393,15 @@ class TreePathSelector(FrozenContract):
     kind: Literal["tree_path"] = "tree_path"
     relative_path: tuple[IdentifierStr, ...] = ()
     value_source: Literal["node_value", "node_name"] = "node_value"
+    steps: Annotated[tuple[TreeStep, ...], Field(max_length=30)] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+
+    @model_validator(mode="after")
+    def _validate_paths(self) -> Self:
+        if self.steps and self.relative_path:
+            raise ValueError("steps несовместим с legacy relative_path")
+        return self
 
 
 class LogTokenSelector(FrozenContract):
@@ -332,6 +448,7 @@ ParseFieldSelector = Annotated[
     TabularColumnSelector
     | TreePathSelector
     | LogTokenSelector
+    | LogRecordSelector
     | DocumentTargetSelector,
     Field(discriminator="kind"),
     WrapValidator(_redact_union_validation_input),
@@ -351,6 +468,15 @@ class TreeNodeGrouping(FrozenContract):
     kind: Literal["tree_nodes"] = "tree_nodes"
     record_path: tuple[IdentifierStr, ...] = ()
     include_descendants: StrictBool = False
+    record_steps: Annotated[tuple[TreeStep, ...], Field(max_length=30)] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+
+    @model_validator(mode="after")
+    def _validate_paths(self) -> Self:
+        if self.record_steps and (self.record_path or self.include_descendants):
+            raise ValueError("record_steps несовместим с legacy grouping")
+        return self
 
 
 class EveryLineStart(FrozenContract):
@@ -414,7 +540,11 @@ class DocumentBlockGrouping(FrozenContract):
 
 
 ParseEntityGrouping = Annotated[
-    TabularRowGrouping | TreeNodeGrouping | LogLineGrouping | DocumentBlockGrouping,
+    TabularRowGrouping
+    | TreeNodeGrouping
+    | LogLineGrouping
+    | DocumentBlockGrouping
+    | ExplicitRecordGrouping,
     Field(discriminator="kind"),
     WrapValidator(_redact_union_validation_input),
 ]
@@ -479,9 +609,42 @@ class _ParsePlanBase(FrozenContract):
     entities: Annotated[tuple[ParseEntity, ...], Field(min_length=1, max_length=32)]
     rules: tuple[ParseRule, ...] = ()
     evidence: tuple[PhysicalSourceRef, ...]
+    analysis: PlanDerivation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def _validate_base_plan(self) -> Self:
+        extended = (
+            self.analysis is not None
+            or any(
+                isinstance(f.selector, LogRecordSelector)
+                or (isinstance(f.selector, TreePathSelector) and f.selector.steps)
+                for f in self.fields
+            )
+            or any(
+                isinstance(e.grouping, ExplicitRecordGrouping)
+                or (
+                    isinstance(e.grouping, TreeNodeGrouping) and e.grouping.record_steps
+                )
+                for e in self.entities
+            )
+            or bool(getattr(self, "record_steps", ()))
+        )
+        if self.schema_version not in {"1.0.0", "1.1.0"} or (
+            extended and self.schema_version != "1.1.0"
+        ):
+            raise ValueError("неподдерживаемая версия ParsePlan")
+        if self.analysis is not None:
+            if (
+                self.analysis.score.confidence != self.confidence
+                or self.analysis.score.blockers
+            ):
+                raise ValueError("plan требует согласованный score без blockers")
+            if self.analysis.unresolved_fields != tuple(
+                f.field_id for f in self.fields if f.semantic_type == "unresolved"
+            ):
+                raise ValueError("unresolved fields не согласованы")
         if not self.fields:
             raise ValueError("parse plan требует хотя бы одно semantic field")
         if not self.entities:
@@ -628,9 +791,21 @@ class TreeParsePlan(_ParsePlanBase):
     kind: Literal["tree"] = "tree"
     root_ref: PhysicalSourceRef
     record_path: tuple[IdentifierStr, ...] = ()
+    record_steps: Annotated[tuple[TreeStep, ...], Field(max_length=30)] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def _validate_root_ref(self) -> Self:
+        if self.record_steps and self.record_path:
+            raise ValueError("record_steps несовместим с legacy record_path")
+        if any(
+            isinstance(e.grouping, TreeNodeGrouping)
+            and e.parent_entity_id is None
+            and e.grouping.record_steps != self.record_steps
+            for e in self.entities
+        ):
+            raise ValueError("root grouping steps не совпадают с plan")
         if self.root_ref.kind is not PhysicalObjectKind.TREE_NODE:
             raise ValueError("root_ref должен ссылаться на physical tree node")
         if self.root_ref.extraction_id != self.evidence[0].extraction_id:
@@ -682,7 +857,8 @@ class LogParsePlan(_ParsePlanBase):
         ):
             raise ValueError("line_refs относятся к другому extraction")
         if any(
-            not isinstance(field.selector, LogTokenSelector) for field in self.fields
+            not isinstance(field.selector, LogTokenSelector | LogRecordSelector)
+            for field in self.fields
         ):
             raise ValueError("log plan требует safe token selectors")
         if any(
@@ -692,7 +868,8 @@ class LogParsePlan(_ParsePlanBase):
         ):
             raise ValueError("log field evidence должно ссылаться на line/value")
         if any(
-            not isinstance(entity.grouping, LogLineGrouping) for entity in self.entities
+            not isinstance(entity.grouping, LogLineGrouping | ExplicitRecordGrouping)
+            for entity in self.entities
         ):
             raise ValueError("log plan требует log line grouping")
         if any(
@@ -702,6 +879,9 @@ class LogParsePlan(_ParsePlanBase):
             if isinstance(entity.grouping, LogLineGrouping)
         ):
             raise ValueError("entity grouping превышает max_lines_per_record")
+        _validate_explicit_records(
+            self.entities, self.fields, self.line_refs, self.max_lines_per_record
+        )
         fields_by_id = {field.field_id: field for field in self.fields}
         for entity in self.entities:
             grouping = entity.grouping
@@ -778,10 +958,13 @@ class DocumentParsePlan(_ParsePlanBase):
                 "document field evidence должно ссылаться на block/table/cell/value"
             )
         if any(
-            not isinstance(entity.grouping, DocumentBlockGrouping)
+            not isinstance(
+                entity.grouping, DocumentBlockGrouping | ExplicitRecordGrouping
+            )
             for entity in self.entities
         ):
             raise ValueError("document plan требует document block grouping")
+        _validate_explicit_records(self.entities, self.fields, self.block_refs, 64)
         fields_by_id = {field.field_id: field for field in self.fields}
         for entity in self.entities:
             grouping = entity.grouping
@@ -798,6 +981,43 @@ class DocumentParsePlan(_ParsePlanBase):
                         "document selector block_offset выходит за entity boundary"
                     )
         return self
+
+
+def _validate_explicit_records(
+    entities: tuple[ParseEntity, ...],
+    fields: tuple[ParseField, ...],
+    scope: tuple[PhysicalSourceRef, ...],
+    maximum: int,
+) -> None:
+    explicit = [e for e in entities if isinstance(e.grouping, ExplicitRecordGrouping)]
+    if not explicit:
+        return
+    if len(explicit) != len(entities):
+        raise ValueError("explicit grouping нельзя смешивать с legacy grouping")
+    refs: list[PhysicalSourceRef] = []
+    for entity in explicit:
+        grouping = entity.grouping
+        if not isinstance(grouping, ExplicitRecordGrouping):
+            continue
+        for record in grouping.records:
+            if len(record) > maximum:
+                raise ValueError("record превышает boundary limit")
+            refs.extend(record)
+            for field in fields:
+                if field.field_id not in entity.field_ids:
+                    continue
+                selector = field.selector
+                offset = (
+                    selector.block_offset
+                    if isinstance(selector, DocumentTargetSelector)
+                    else selector.line_offset
+                    if isinstance(selector, LogTokenSelector)
+                    else None
+                )
+                if offset is not None and offset >= len(record):
+                    raise ValueError("selector выходит за explicit record")
+    if len(refs) != len(set(refs)) or set(refs) != set(scope):
+        raise ValueError("explicit records должны покрывать scope ровно один раз")
 
 
 ParsePlan = Annotated[
@@ -1030,8 +1250,28 @@ class StructureRejected(FrozenContract):
         return self
 
 
+class StructureNeedsSemanticAnalysis(FrozenContract):
+    """Правил или проверенного physical scope недостаточно; LLM не вызывается."""
+
+    kind: Literal["needs_semantic_analysis"] = "needs_semantic_analysis"
+    code: Literal["NEEDS_SEMANTIC_ANALYSIS"] = "NEEDS_SEMANTIC_ANALYSIS"
+    profile: StructureProfile
+    issues: Annotated[tuple[ValidationIssue, ...], Field(min_length=1, max_length=16)]
+
+    @model_validator(mode="after")
+    def _validate_outcome(self) -> Self:
+        _validate_profile_contract(self.profile)
+        _validate_issue_refs(
+            self.issues, allowed_refs=self.profile.evidence, context="semantic analysis"
+        )
+        return self
+
+
 StructureAnalysisResult = Annotated[
-    StructurePlanCreated | StructureNeedsReview | StructureRejected,
+    StructurePlanCreated
+    | StructureNeedsReview
+    | StructureRejected
+    | StructureNeedsSemanticAnalysis,
     Field(discriminator="kind"),
     WrapValidator(_redact_union_validation_input),
 ]
@@ -1196,6 +1436,9 @@ class ParseExecutionContext(FrozenContract):
     parse_plan_fingerprint: FingerprintStr
     manifest: ExtractedDatasetManifest
     max_records_per_batch: PositiveInt = 1_000
+    profile: StructureProfile | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def _validate_manifest(self) -> Self:
@@ -1203,4 +1446,9 @@ class ParseExecutionContext(FrozenContract):
             raise ValueError("execution context относится к другому source")
         if self.extraction_fingerprint != self.manifest.extraction_fingerprint:
             raise ValueError("execution context относится к другому extraction")
+        if self.profile is not None and (
+            self.profile.source != self.manifest.source
+            or self.profile.extraction_fingerprint != self.extraction_fingerprint
+        ):
+            raise ValueError("execution profile относится к другому extraction")
         return self

@@ -12,7 +12,8 @@
 | TXT/LOG/CSV/JSON | FR-004–FR-006, FR-012–FR-013, NFR-006, M4 |
 | XML/HTML/YAML | FR-007–FR-008, 20.5–20.7, M4 |
 | XLSX/PDF/DOCX | FR-009–FR-011, 20.13, M4 |
-| Database Inspector | 9, 10, 13, M5 |
+| Structural profiling и ParsePlan | FR-012.1–FR-012.2, FR-014, 20.9, 20.13, M5 |
+| Database Inspector | 9, 10, 13, M7 |
 | Source Profiler | FR-013, 11.4–11.6, 12, M6 |
 | Deterministic Mapper | 10–14, M7 |
 | LLM layer | 11.8–11.9, 12, 14, 19, 20.2, 20.10–20.11, M8 |

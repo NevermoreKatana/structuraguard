@@ -1,8 +1,279 @@
 # Публичный API StructuraGuard
 
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
-текущей реализации M4, включая parser groups A–C. Facade-операции pipeline в эту
+текущей реализации M4 и этапов M5-A/B/C. Facade-операции pipeline в эту
 поставку не входят.
+
+Начните с [копируемого примера CSV → NormalizedBatch](structure.md).
+Канонические требования M5: [FR-014][spec-fr-014] и [раздел M5][spec-m5].
+
+## ParsePlanValidator и ParsePlanExecutor M5-C
+
+```python
+from collections.abc import AsyncIterable, AsyncIterator
+
+from structuraguard.contracts import ExtractedBatch, NormalizedBatch
+from structuraguard.contracts.parsing import (
+    ParseExecutionContext,
+    ParsePlanValidationRequest,
+)
+from structuraguard.structure import ParsePlanExecutor, ParsePlanOptions, ParsePlanValidator
+
+
+async def normalize_with_plan(
+    request: ParsePlanValidationRequest,
+    validation_stream: AsyncIterable[ExtractedBatch],
+    execution_stream: AsyncIterable[ExtractedBatch],
+) -> AsyncIterator[NormalizedBatch]:
+    options = ParsePlanOptions()
+    validation = await ParsePlanValidator(options=options).validate_source(
+        request, validation_stream,
+    )
+    if validation.validated_plan is None:
+        raise ValueError(tuple(issue.code for issue in validation.issues))
+    context = ParseExecutionContext(
+        run_id="example_run",
+        source_fingerprint=request.source.source_fingerprint,
+        extraction_fingerprint=request.manifest.extraction_fingerprint,
+        parse_plan_fingerprint=request.plan.fingerprint,
+        manifest=request.manifest,
+        profile=request.profile,
+        max_records_per_batch=100,
+    )
+    async for batch in ParsePlanExecutor(options=options).execute(
+        execution_stream, validation.validated_plan, context,
+    ):
+        yield batch
+```
+
+Передайте два независимых replay одного extraction: потреблённый iterator нельзя
+использовать повторно. Validator не хранит весь source. Синхронный вариант:
+`validator.validate(request, batches=iterable)`. Без physical replay `validate`
+возвращает `REJECTED` с `PARSE_PLAN_REPLAY_REQUIRED`. Оба метода принимают DTO либо
+обычный decoded JSON dict с полями `ParsePlanValidationRequest`; malformed plan
+возвращает typed rejection без raw payload в diagnostics.
+
+Validator проверяет schema, versions, hashes, source/index membership, policy,
+limits, field ownership, record overlap и реальные paths/rows/cells/blocks полного
+source. Plans `1.0.0`/`1.1.0` допустимы; extraction/profile требуют `1.1.0`.
+Успех создаёт `ValidatedParsePlan` с policy/options fingerprint. Executor требует
+тот же options contract и `context.profile`, повторяет проверки, а каждый input
+batch сверяет с заранее известным manifest. Wrapper не является capability.
+
+Поддержаны четыре семейства: tabular finite rows/repeated headers, literal tree
+paths с дочерними коллекциями, explicit LOG/document records и ограниченные
+legacy groupings. `ParseRule`, identity, include-descendants, неоднозначные legacy
+record starts и document table-column targets отклоняются явно; таблицы применяются
+через `TabularParsePlan`. Никакие unknown operators, regex, Python, SQL, shell или
+callbacks не исполняются. Semantic type hint не включает conversion; bytes требуют
+отдельной policy, money — native Decimal. Полная allowlist описана в
+[ADR 0010](adr/0010-verified-parse-plan-execution.md).
+
+Executor выдаёт `NormalizedBatch` schema `1.1.0`, `NormalizedRecord` и
+`SemanticEntity`. Native raw scalars сохраняются. `NormalizedValue.origins`
+содержит physical refs, raw parent values и точные SourceLocation; `selection`
+содержит allowlisted operation и hash selector. Token/key/value extraction
+сохраняет полный parent в `raw_value`, выбранный текст — в `normalized_value`.
+Multiline LOG и PDF blocks сохраняют отдельные line origins; агрегированный raw
+текст использует LF, а не обещает восстановление оригинальных line endings.
+Parent/child entities находятся в одном record, без cartesian product.
+
+Каждый output batch и terminal manifest получают canonical hash; одинаковые
+source/plan/run/options дают одинаковые output IDs и payload. Промежуточные batches
+не означают успех: terminal manifest выдаётся только после EOF, проверки всех refs
+и успешного закрытия source. В downstream нужны staging/rollback; database writes
+этот компонент не выполняет. Пустой допустимый scope даёт один пустой terminal batch.
+
+`ParseExecutionError.issue` (из `structuraguard.exceptions`) содержит стабильный
+code, stage, reason, batch index при наличии и число уже выданных batches.
+Отказы включают `PARSE_PLAN_INVALID`, `PARSE_PLAN_UNSUPPORTED`,
+`PARSE_PLAN_SOURCE_MISMATCH`, `PARSE_EXECUTION_MISMATCH`,
+`PARSE_EXECUTION_SOURCE_ERROR`, `SECURITY_LIMIT_EXCEEDED`, `PROCESSING_TIMEOUT`.
+Cancellation распространяется после cleanup; consumer должен закрывать iterator
+через `aclose()` при раннем выходе. Source errors и cleanup failures не выдают
+успешного terminal batch и не публикуют raw exception messages.
+
+`ParsePlanOptions` задаёт `source_limits`, `max_plan_bytes`, `max_record_bytes`,
+`max_record_items`, `max_output_batch_bytes`, `max_records`, `max_output_batches`.
+`max_records_per_batch` задаётся context и ограничен 1000. Scope/index refs,
+незавершённые records и summaries ограничены budgets; все просмотренные values
+не накапливаются. Active async deadline исключает паузу consumer; sync timeout
+cooperative и не прерывает блокирующий пользовательский `next()`.
+Legacy Normalized DTO продолжают serialization без новых пустых полей; origins
+и новые проверяемые normalized hashes требуют schema `1.1.0`.
+`NormalizedDatasetManifest.validate_batch()` проверяет hash самого manifest и
+одного batch; `validate_batches()` дополнительно проверяет полный порядок/counts
+и уникальность IDs. Hash manifest вычисляется один раз на проход. Метод не
+удерживает raw batches, но сохраняет множества IDs и не обещает постоянную память.
+Несогласованный payload вызывает `ValueError`. Hash подтверждает согласованность,
+а не подлинность внешнего источника.
+
+## DeterministicStructureAnalyzer M5-B
+
+```python
+from collections.abc import AsyncIterable
+from decimal import Decimal
+
+from structuraguard.contracts import ExtractedBatch
+from structuraguard.contracts.parsing import StructureAnalysisResult
+from structuraguard.structure import (
+    DeterministicStructureAnalyzer,
+    StructureAnalysisOptions,
+)
+
+
+async def propose_parse_plan(
+    batches: AsyncIterable[ExtractedBatch],
+) -> StructureAnalysisResult:
+    analyzer = DeterministicStructureAnalyzer(options=StructureAnalysisOptions(
+        confidence_threshold=Decimal("0.85"),
+    ))
+    return await analyzer.analyze(batches)
+```
+
+Analyzer принимает terminal batch или полный async stream и закрывает принятый
+iterator после прохода, включая cancellation. `analyze(batches, profile=profile)`
+проверяет совпадение с исходным профилем; sampling options должны совпадать.
+Повторно читать уже потреблённый iterator нельзя: передайте новый parser stream.
+
+Существующий `SemanticStructureAnalyzer` protocol также поддерживается:
+`analyze(request, batches=replay)`. Самостоятельный profile допускает
+`analyze(profile, batches=replay)`. Без replay request/profile возвращает
+`STRUCTURE_REPLAY_REQUIRED`; manifest и bounded scalar samples недостаточны для
+подтверждения существования всех paths/координат. Несогласованный или подменённый
+DTO вызывает `StructuralAnalysisError` с `STRUCTURE_INPUT_INVALID`.
+
+Типизированные исходы:
+
+- `StructurePlanCreated(kind="plan_created")`: один schema `1.1.0` plan,
+  confidence не ниже порога, полное покрытие, нет blocking reasons.
+- `StructureNeedsReview(kind="needs_review")`: ranked `StructureCandidate`
+  list при нескольких гипотезах или независимых scopes. Порог не скрывает
+  альтернативы; при равном confidence порядок задают kind и canonical ID.
+- `StructureNeedsSemanticAnalysis(kind="needs_semantic_analysis",
+  code="NEEDS_SEMANTIC_ANALYSIS")`: недостаточно правил/покрытия, низкий score
+  либо требуется replay. Это описание результата; LLM не вызывается.
+- `StructureRejected(kind="rejected")` с `STRUCTURE_MODE_UNSUPPORTED`:
+  request использует mode, отличный от `deterministic`. Скрытого fallback нет.
+
+`candidate.assessment` содержит policy `structural_min_v1`, boundary, regularity,
+coverage, options fingerprint, evidence IDs и blockers. Confidence — минимум
+трёх компонентов. Переполнение sampling/candidate budgets запрещает automatic
+plan при любом пороге. Исходный profile не меняется: результат получает derived
+profile со своим fingerprint и producer. `plan.analysis` связывает его с исходным
+profile и полным списком unresolved fields. `semantic_type` и entity type остаются
+`unresolved`; имена полей технические, primitive hints ничего не преобразуют.
+
+Реализованы `TabularParsePlan` для проверенных header/data/footer ranges,
+`TreeParsePlan` с literal raw-key/item steps и child entities, `LogParsePlan`
+с точными physical record groups и raw текстом, `DocumentParsePlan` с heading
+sections или per-block policy. Новые selectors/groupings берутся из закрытой
+grammar: `TreePathOperation`, `RecordOperation`, discriminated enum tags.
+Нет Python, SQL, shell, callbacks или исполняемого regex. Literal raw key с
+похожим текстом остаётся безопасными данными. Старые планы `1.0.0` сохраняют
+serialization; новые extensions требуют `1.1.0`.
+
+`StructureAnalysisOptions.profiling` задаёт budgets общего проверяющего прохода;
+`max_plan_bytes` ограничивает plan (default 1 MiB, hard cap 4 MiB). Общий результат
+ограничен суммой budgets plan/profile, работа — deadline profiler. Resource
+exceptions остаются `SecurityPolicyError`, cancellation распространяется наружу.
+Неподдержанные/неполные scopes не получают automatic plan. XML element selectors,
+optional tree fields, неопределённые ragged/merged ranges требуют отдельной policy.
+Plan ещё должен пройти независимый `ParsePlanValidator` перед execution M5-C.
+
+Решения и границы: [ADR 0009](adr/0009-deterministic-structure-analysis.md).
+
+## StructuralProfiler M5-A
+
+`StructuralProfiler` читает один terminal `ExtractedBatch` или одноразовый
+async stream до terminal manifest и возвращает `StructureProfile`. Источник
+целиком в памяти не сохраняется; вызывающий код передаёт уже выбранный parser
+stream, а profiler не повторяет parsing и не выполняет сетевые запросы.
+
+```python
+from collections.abc import AsyncIterable
+
+from structuraguard.contracts import ExtractedBatch, StructureProfile
+from structuraguard.structure import StructuralProfiler, StructuralProfilingOptions
+
+
+async def inspect_structure(
+    batches: AsyncIterable[ExtractedBatch],
+) -> StructureProfile:
+    profiler = StructuralProfiler(options=StructuralProfilingOptions(
+        max_sample_items=256,
+        max_sample_bytes=65_536,
+        tail_rows=8,
+    ))
+    return await profiler.profile(batches)
+```
+
+Profiler выдаёт профиль schema `1.1.0` с `coverage`, `observations` и ranked
+`candidates`. Каждый `StructureEvidence` содержит физические `source_refs`,
+confidence и typed observation из `structuraguard.contracts.structure`:
+
+- `TabularObservation`: shape, header/data regions, repeated headers,
+  empty/meta/summary/footer rows и XLSX merged ranges; индексы rows — нулевые,
+  обе границы включены. Полный проход считает widths/raggedness, а гипотезы
+  строятся по ограниченным rows.
+- `TreeObservation`: repeated paths, record roots, containers, parent paths,
+  sampled key/type distributions; Unicode keys, occurrences и namespaces
+  остаются частью структурного пути. Array item — descriptive step, не
+  executable wildcard. Деревья не flatten.
+- `TextObservation`: line/block spans, line shapes, token templates, key-value
+  patterns, timestamp/level hints и multiline candidates. Generated regex нет;
+  template tokens являются только данными. Counts clusters относятся к sample.
+- `DocumentObservation`: headings, sections, nearby key-value blocks,
+  table candidates и repeated block groups. Table evidence не выдумывает
+  номера document blocks.
+- `FieldObservation`: candidate name/raw label, физическая колонка или tree
+  path и primitive distributions (`type_counts`). Hints не изменяют значения,
+  leading zeros сохраняют возможность identifier; timezone не угадывается.
+
+`candidate.observation_ids` указывает на конкретные `evidence_id`, а
+`candidate.evidence` — на физические refs. Profiler не выбирает один plan и не
+выдаёт разрешение на execution. Confidence — версия эвристики `1.0.0`, не
+вероятность корректности. Полные повторные вызовы с одинаковым extraction и
+options дают одинаковый canonical payload независимо от global decimal context.
+
+`coverage` сообщает `seen_items`, `sampled_items`, `sampled_bytes`,
+`skipped_items`, `complete`, `reasons` и options fingerprint. Единица выборки —
+row, tree node, line или block. Bytes учитывают bounded raw payload с запасом
+на retained coordinates, а не обещают точное измерение Python heap.
+`complete` описывает покрытие профиля, а не заменяет проверку terminal manifest.
+Для таблиц сохраняются prefix и tail в общем бюджете; `tail_rows=0` отключает
+tail. Для остальных семейств используется физический префикс. Samples разных
+семейств делят бюджет, поэтому большой ранний раздел может ограничить поздний.
+
+Пустой источник возвращает пустые observations/candidates и нулевой coverage.
+Недостаток пригодных samples также может дать пустой профиль, но coverage
+покажет увиденные объекты и причины пропуска. Нельзя передавать такой профиль
+в непустой `StructureAnalysisRequest` без дополнительного evidence.
+
+Immutable options задают также пределы value chars, columns/depth, structures,
+patterns, observations/candidates, bytes результата и входного batch, total
+items/physical objects, batches и processing seconds. Hard caps: 1 000 sample
+items, 1 MiB sample payload, 32 candidates, 30 уровней paths, 10 000 batches,
+10 млн physical objects и 300 секунд. Избыточные samples/гипотезы отмечаются
+coverage reason; operational overflow возвращает `SecurityPolicyError` с
+`SECURITY_LIMIT_EXCEEDED` и безопасными числовыми details.
+
+Несогласованный stream даёт `StructuralProfilingError` из
+`structuraguard.exceptions` с `STRUCTURE_INPUT_INVALID`; timeout —
+`PROCESSING_TIMEOUT`. Отмена распространяется, owned iterator закрывается.
+Ошибки внешнего source iterator заменяются безопасными сообщениями без исходных
+details/traceback context; сохраняются только коды `BuiltInErrorCode` и стандартные
+категории `ParserError`/`SecurityPolicyError`. Остальные ошибки source становятся
+`StructuralProfilingError`. Этот контракт действует и при вызове profiler из analyzer.
+Profiler не подменяет parser sandbox. Legacy extraction `1.0.0` допускается
+только при bounded полном catalog до 10 000 refs; extraction `1.1.0` использует
+селективный index. Raw source, templates и field labels могут содержать
+конфиденциальные данные: profiler их не логирует и не отправляет наружу.
+
+Схема profile `1.0.0` сохраняет прежние wire bytes. Изменение batch size может
+изменить extraction/profile fingerprints; при достаточном sample budget
+структура сравнивается по physical coordinates и содержанию observations.
+Реализации analyzer, validator и executor M5 описаны выше; facade pipeline пока не подключён.
 
 Целевой API следующих milestone описан в каноническом разделе
 [23. Публичный API SDK][spec-public-api]. Он не считается доступным, пока
@@ -177,8 +448,8 @@ M2 фиксирует contracts. Concrete TXT/LOG/Markdown, CSV/TSV и JSON-fami
 staging и audit backends по-прежнему не входят в этот срез.
 
 `ValidatedParsePlan` и `ValidatedMappingPlan` сохраняют evidence успешной
-проверки, но не являются неподделываемыми полномочиями. Будущий executor или DB
-adapter обязан повторно сверить fingerprints, target и policy с execution
+проверки, но не являются неподделываемыми полномочиями. Executor M5 повторяет проверки; будущий DB
+adapter также обязан повторно сверить fingerprints, target и policy с execution
 context.
 
 `Extracted*` и `Normalized*` могут содержать недоверенные и sensitive raw
@@ -1056,7 +1327,7 @@ resource limits и secret review обеспечивает вызывающий �
   резервируют dependency bundles.
 - Registry, parser boundary и группы TXT/LOG/Markdown, CSV/TSV и
   JSON/JSONL/NDJSON, XML/HTML/YAML и XLSX/PDF/DOCX реализованы, Tika доступен только
-  opt-in. Semantic analyzer/executor, DB inspection/load,
+  opt-in. Structural analyzer и ParsePlan execution M5 описаны выше; DB inspection/load,
   validation pipeline и LLM operations отсутствуют.
 - M3 не реализует orchestrator и не имеет успешного ingest-сценария.
 - Terminal manifests сами проверяют terminal batch. Для всей последовательности
@@ -1064,7 +1335,8 @@ resource limits и secret review обеспечивает вызывающий �
   проверка потоково сверяет lineage-aware summaries, terminal marker, counts и
   глобальную уникальность normalized IDs, не удерживая raw values всех batches.
   Эта проверка не запускается автоматически для уже отданных non-terminal
-  batches; orchestration её вызова относится к будущему executor.
+  batches. Executor M5 независимо проверяет каждый physical batch и строит
+  normalized summaries с уникальными IDs без накопления всех output records.
 
 Требования scaffold определены разделами [M1][spec-m1],
 [NFR-001][spec-nfr-001], [NFR-003][spec-nfr-003] и
@@ -1082,4 +1354,6 @@ evidence scaffold находится в [плане M1](plans/M01_sdk_scaffold.m
 [spec-m2]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m2-доменные-модели-и-contracts
 [spec-m3]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m3-parser-registry
 [spec-m4]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m4-technical-parsers
+[spec-fr-014]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-014-structural-profiling-и-parseplan
+[spec-m5]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m5-structural-profiler-и-deterministic-parseplan
 [spec-nfr-006]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#nfr-006-streaming

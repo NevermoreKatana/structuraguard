@@ -1,10 +1,15 @@
 """Публичные типизированные ошибки StructuraGuard."""
 
+from __future__ import annotations
+
 import math
 import re
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from structuraguard.contracts.execution import ParseExecutionIssue
 
 type ErrorDetailScalar = str | int | float | bool | None
 type ErrorDetailInput = (
@@ -288,6 +293,31 @@ class SourceError(StructuraGuardError):
 
 class ParserError(StructuraGuardError):
     """Ошибка определения формата или разбора источника."""
+
+
+class StructuralAnalysisError(StructuraGuardError):
+    """Нарушен contract или deadline deterministic structure analysis."""
+
+
+class ParseExecutionError(StructuraGuardError):
+    """Fatal typed issue; уже выданные batches остаются промежуточными."""
+
+    def __init__(self, issue: ParseExecutionIssue) -> None:
+        self.issue = issue
+        super().__init__(
+            error_code=issue.code,
+            message="Применение ParsePlan не завершено",
+            details={
+                "reason": issue.reason,
+                "stage": issue.stage.value,
+                "batch_index": issue.batch_index,
+                "emitted_batches": issue.emitted_batches,
+            },
+        )
+
+
+class StructuralProfilingError(StructuraGuardError):
+    """Недопустимый либо незавершённый поток structural profiling."""
 
 
 class DatabaseInspectionError(StructuraGuardError):
