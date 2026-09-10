@@ -12,7 +12,18 @@ PACKAGE_PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
 SOURCE_PACKAGE = PACKAGE_ROOT / "src" / "structuraguard"
 
 EXPECTED_EXTRAS = frozenset(
-    {"postgres", "pdf", "excel", "office", "litellm", "tika", "xml", "yaml", "all"}
+    {
+        "postgres",
+        "pdf",
+        "excel",
+        "office",
+        "litellm",
+        "llm",
+        "tika",
+        "xml",
+        "yaml",
+        "all",
+    }
 )
 EXPECTED_EXTRA_PACKAGES: Mapping[str, frozenset[str]] = {
     "xml": frozenset({"defusedxml"}),
@@ -22,6 +33,7 @@ EXPECTED_EXTRA_PACKAGES: Mapping[str, frozenset[str]] = {
     "excel": frozenset({"openpyxl", "defusedxml"}),
     "office": frozenset({"python-docx", "defusedxml"}),
     "litellm": frozenset({"litellm"}),
+    "llm": frozenset({"httpx", "httpcore"}),
     "tika": frozenset({"httpx", "httpcore", "defusedxml"}),
 }
 
@@ -106,7 +118,7 @@ def test_optional_extras_are_exact_and_all_is_the_deduplicated_union() -> None:
 def test_tika_trace_redaction_backend_version_is_pinned() -> None:
     project = _load_package_project()
     extras = _as_mapping(project.get("optional-dependencies"), "optional-dependencies")
-    for extra in ("tika", "all"):
+    for extra in ("tika", "llm", "all"):
         assert "httpcore==1.0.9" in _as_string_sequence(extras[extra], extra)
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, StrictBool, WrapValidator, model_validator
+from pydantic import Field, StrictBool, StrictStr, WrapValidator, model_validator
 
 from structuraguard.contracts._base import FrozenContract, canonical_sha256_value
 from structuraguard.contracts.analysis import (
@@ -36,6 +36,12 @@ from structuraguard.contracts.common import (
     VersionStr,
     _redact_union_validation_input,
 )
+from structuraguard.contracts.document_semantics import (
+    DocumentSpanGrouping,
+    DocumentSpanSelector,
+)
+from structuraguard.contracts.llm import LLMPlanProvenance
+from structuraguard.contracts.semantic import SemanticConfidence
 from structuraguard.contracts.source import ExtractedDatasetManifest, SourceLocation
 from structuraguard.contracts.structure import (
     DocumentObservation,
@@ -449,7 +455,8 @@ ParseFieldSelector = Annotated[
     | TreePathSelector
     | LogTokenSelector
     | LogRecordSelector
-    | DocumentTargetSelector,
+    | DocumentTargetSelector
+    | DocumentSpanSelector,
     Field(discriminator="kind"),
     WrapValidator(_redact_union_validation_input),
 ]
@@ -544,7 +551,8 @@ ParseEntityGrouping = Annotated[
     | TreeNodeGrouping
     | LogLineGrouping
     | DocumentBlockGrouping
-    | ExplicitRecordGrouping,
+    | ExplicitRecordGrouping
+    | DocumentSpanGrouping,
     Field(discriminator="kind"),
     WrapValidator(_redact_union_validation_input),
 ]
@@ -581,6 +589,9 @@ class ParseField(FrozenContract):
     field_id: IdentifierStr
     semantic_name: IdentifierStr
     semantic_type: IdentifierStr
+    locale_hint: (
+        Annotated[StrictStr, Field(pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")] | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
     source_refs: tuple[PhysicalSourceRef, ...]
     selector: ParseFieldSelector
     rules: tuple[ParseRule, ...] = ()
@@ -605,6 +616,15 @@ class _ParsePlanBase(FrozenContract):
     profile_fingerprint: FingerprintStr
     confidence: ConfidenceDecimal
     producer: ProducerMetadata
+    semantic_generations: Annotated[
+        tuple[LLMPlanProvenance, ...], Field(max_length=128)
+    ] = Field(default=(), exclude_if=lambda value: not value)
+    final_assessment: SemanticConfidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    semantic_analysis: LLMPlanProvenance | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     fields: Annotated[tuple[ParseField, ...], Field(min_length=1, max_length=1_024)]
     entities: Annotated[tuple[ParseEntity, ...], Field(min_length=1, max_length=32)]
     rules: tuple[ParseRule, ...] = ()
@@ -617,6 +637,8 @@ class _ParsePlanBase(FrozenContract):
     def _validate_base_plan(self) -> Self:
         extended = (
             self.analysis is not None
+            or self.semantic_analysis is not None
+            or any(f.locale_hint is not None for f in self.fields)
             or any(
                 isinstance(f.selector, LogRecordSelector)
                 or (isinstance(f.selector, TreePathSelector) and f.selector.steps)
@@ -631,15 +653,25 @@ class _ParsePlanBase(FrozenContract):
             )
             or bool(getattr(self, "record_steps", ()))
         )
-        if self.schema_version not in {"1.0.0", "1.1.0"} or (
-            extended and self.schema_version != "1.1.0"
+        if self.schema_version not in {"1.0.0", "1.1.0", "1.2.0"} or (
+            extended and self.schema_version not in {"1.1.0", "1.2.0"}
         ):
             raise ValueError("неподдерживаемая версия ParsePlan")
+        spans = any(isinstance(f.selector, DocumentSpanSelector) for f in self.fields)
+        if (
+            spans or self.final_assessment is not None or self.semantic_generations
+        ) and self.schema_version != "1.2.0":
+            raise ValueError("Hybrid assessment/spans требуют schema 1.2.0")
+        if (
+            self.final_assessment is not None
+            and self.final_assessment.confidence != self.confidence
+        ):
+            raise ValueError("Hybrid confidence не согласован")
         if self.analysis is not None:
             if (
-                self.analysis.score.confidence != self.confidence
-                or self.analysis.score.blockers
-            ):
+                self.final_assessment is None
+                and self.analysis.score.confidence != self.confidence
+            ) or self.analysis.score.blockers:
                 raise ValueError("plan требует согласованный score без blockers")
             if self.analysis.unresolved_fields != tuple(
                 f.field_id for f in self.fields if f.semantic_type == "unresolved"
@@ -653,7 +685,9 @@ class _ParsePlanBase(FrozenContract):
             raise ValueError("parse plan требует physical evidence")
         if len({field.field_id for field in self.fields}) != len(self.fields):
             raise ValueError("field_id должны быть уникальны")
-        if len({field.semantic_name for field in self.fields}) != len(self.fields):
+        if not spans and len({field.semantic_name for field in self.fields}) != len(
+            self.fields
+        ):
             raise ValueError("semantic_name должны быть уникальны")
         if len({entity.entity_id for entity in self.entities}) != len(self.entities):
             raise ValueError("entity_id должны быть уникальны")
@@ -928,6 +962,46 @@ class DocumentParsePlan(_ParsePlanBase):
 
     @model_validator(mode="after")
     def _validate_block_refs(self) -> Self:
+        if all(isinstance(f.selector, DocumentSpanSelector) for f in self.fields):
+            if self.schema_version != "1.2.0" or not self.block_refs:
+                raise ValueError("Document spans требуют 1.2.0 и scope")
+            _reject_duplicate_refs(self.block_refs, field="block_refs")
+            if any(
+                ref.kind
+                not in {
+                    PhysicalObjectKind.BLOCK,
+                    PhysicalObjectKind.LINE,
+                    PhysicalObjectKind.TREE_NODE,
+                }
+                for ref in self.block_refs
+            ):
+                raise ValueError(
+                    "Document span scope требует text blocks/lines/tree nodes"
+                )
+            fields = {f.field_id: f for f in self.fields}
+            groups = {e.entity_id: e.grouping for e in self.entities}
+            for entity in self.entities:
+                if not isinstance(entity.grouping, DocumentSpanGrouping):
+                    raise ValueError("Spans требуют document_spans grouping")
+                if entity.grouping.anchor.source_ref not in self.block_refs:
+                    raise ValueError("Entity anchor вне document scope")
+                names = [fields[f].semantic_name for f in entity.field_ids]
+                if len(set(names)) != len(names):
+                    raise ValueError("Duplicate field names внутри entity")
+                if entity.parent_entity_id is not None:
+                    parent = groups[entity.parent_entity_id]
+                    if (
+                        not isinstance(parent, DocumentSpanGrouping)
+                        or parent.record_id != entity.grouping.record_id
+                    ):
+                        raise ValueError("Parent находится в другой record")
+            for field in self.fields:
+                selector = field.selector
+                assert isinstance(selector, DocumentSpanSelector)
+                refs = {span.source_ref for span in selector.spans}
+                if refs != set(field.source_refs) or not refs <= set(self.block_refs):
+                    raise ValueError("Span refs не согласованы со scope/evidence")
+            return self
         if not self.block_refs:
             raise ValueError("document plan требует block_refs")
         _reject_duplicate_refs(self.block_refs, field="block_refs")

@@ -2,13 +2,28 @@
 
 Обновлено: 2026-09-10.
 
+Последний полный запуск перед ручным commit и Draft PR M6:
+**2219 tests**, **18 integration**, **433 security**, lint (225 файлов), mypy
+(223 файла), strict docs, lock-check и offline wheel/sdist verification — успешно.
+Команды и результаты:
+[checklist передачи M6](../plans/M06_llm_semantic_parsing.md#checklist-commit-pr).
+Это не означает полную приёмку исходного scope: K5/K7 подтверждены частично.
+Наблюдаемые tests и незавершённые сценарии: [матрица M6](../plans/M06_acceptance.md).
+Предыдущие проверки сохранены отдельно:
+[security review M6](../plans/M06_security_review.md) и
+[docs/examples](#m06-docs-checks).
+
 ## Текущая версия и milestone
 
 - Версия package: `0.3.0`.
-- Текущий milestone: `M5 — Structural Profiler и deterministic ParsePlan`.
+- Текущий milestone: `M6 — LLM-assisted Semantic Parsing`; реализован provider
+  foundation A, минимальный HTTP/router B, LLMStructureAnalyzer C и bounded Hybrid D.
+  Bounded scope подготовлен к ручному commit и Draft PR в `main`; полная приёмка
+  исходного M6 остаётся частичной. [Checklist передачи](../plans/M06_llm_semantic_parsing.md#checklist-commit-pr).
+- `M5 — Structural Profiler и deterministic ParsePlan`:
   A (`StructuralProfiler`), B (`DeterministicStructureAnalyzer`) и C
   (`ParsePlanValidator`/`ParsePlanExecutor`) реализованы в пределах закрытой policy.
-- Активная ветка: `feat/m05-parse-plan`; текущие изменения M5 локальные.
+- Активная ветка: `feat/m06-llm-semantic-parsing`; текущие изменения M6 локальные.
   Версия package не повышалась; commit/push/PR в этой работе не выполнялись.
 - M5 подготовлен к ручному commit и PR в `main` в пределах документированной
   policy. Актуальные checklist, состав diff, команды и незакрытые пункты:
@@ -22,11 +37,12 @@
   Остаточные ограничения [приёмки M4](../plans/M04_acceptance_audit.md) сохраняются.
   Локальные gates M5 не подтверждают remote CI или реальный Tika deployment.
 
-Канонический scope: [FR-014][spec-fr-014] и [M5 в техническом задании][spec-m5].
-Фактическая policy и отличия от предварительного design:
-[`M05_parse_plan.md`](../plans/M05_parse_plan.md). Копируемый пример:
-[CSV → NormalizedBatch](../structure.md). Facade pipeline следующих этапов
-не считается доступным.
+Канонический scope parsing: [FR-014][spec-fr-014], [FR-015][spec-fr-015],
+[M5][spec-m5] и [M6][spec-m6] в техническом задании.
+Фактическая policy и ограничения: [план M5](../plans/M05_parse_plan.md),
+[план M6](../plans/M06_llm_semantic_parsing.md),
+[semantic parsing API с копируемым offline-примером](../semantic-parsing.md).
+Общая SDK facade и DB mapping не считаются доступными.
 
 ## Состояние milestones
 
@@ -40,7 +56,24 @@
   C (`JSON`, `JSONL`, `NDJSON`), D (`XML`, `HTML`, `YAML`) и E (`XLSX`, `PDF`, `DOCX`).
   Optional F (`Tika`) реализована вне default factories.
 - `M5` — реализованы A/B/C; подтверждён только scope, описанный в API и ADR 0008–0010.
-- `M6`–`M17` — не начаты.
+- `M6` — реализованы A–D в bounded scope: provider contract suite и fake/no-LLM,
+  HTTP adapter и отдельный policy-aware router; strict LLM ParsePlan proposal;
+  Hybrid analyzer, document chunks/grounded entities и `SemanticParsingSession`.
+  Три режима, default `llm_assisted`; full source validation/execution, zero-call
+  deterministic/saved-plan paths, preview/review/report и usage проверены tests.
+  [Provider API](../llm.md), [LLM analyzer](../llm-semantic-parsing.md),
+  [Hybrid API](../semantic-parsing.md); решения ADR 0011–0014.
+  Production PII scanner/redaction, безопасный aggregate report целиком,
+  analyzer registry и router/session facade отсутствуют. K5/K7 исходной приёмки
+  остаются частичными; DB mapping вне scope M6.
+  Security review исправил 3 Medium: provider exception leaks, token/context caps
+  и повторное открытие session budget после failed/cancelled analysis.
+  Последующий финальный review выявил ещё 1 High и 2 Medium: снятие review при
+  saved document replay, отсутствие общего deadline при его проверке и overflow
+  terminal issues. Все три исправлены с 12 regression cases.
+  Незакрытых подтверждённых Critical/High/Medium в проверенном diff не осталось;
+  ограничения и непроверенные сценарии сохранены в отчёте review.
+- `M7`–`M17` — не начаты.
 
 ## Реализованные публичные contracts
 
@@ -91,9 +124,17 @@
   и всю execution fingerprint chain.
 
 `structuraguard.structure` экспортирует profiler, deterministic analyzer,
-validator/executor и их immutable options. Semantic meaning остаётся unresolved.
-LLM-assisted analyzer, DB reflection/load, LLM providers, staging/audit backends,
-sandbox runner, state machine и orchestrator не реализованы.
+validator/executor, LLMStructureAnalyzer и immutable options. M5 сохраняет unresolved
+semantics; M6-C предлагает bounded semantic names/type/locale hints после source
+validation. Hybrid/session, chunk extraction/span execution и report доступны через
+[semantic parsing API](../semantic-parsing.md). DB reflection/load, production PII
+scanner/redaction, staging/audit backends, state machine и общая ingest/router facade не реализованы.
+
+M6-C API и limits: [LLM semantic parsing](../llm-semantic-parsing.md),
+[ADR 0013](../adr/0013-validated-llm-structure-analysis.md). Обязательны trusted scanner,
+реальный ParsePlanValidator и два полных replay. Один invocation вызывает LLM
+максимум один раз; неоднозначность, low score и неполный scope дают NEEDS_REVIEW.
+DB mapping не добавлялся.
 
 ## Подтверждённое поведение M5
 
@@ -510,17 +551,125 @@ fix; агент commit/push/PR не выполнял. Открытые AC и rel
   scoring, закрытая grammar и unresolved semantics.
 - [ADR 0010](../adr/0010-verified-parse-plan-execution.md) — physical replay,
   недоверенный wrapper, provenance и terminal success после cleanup.
+- [ADR 0011](../adr/0011-llm-provider-foundation.md) — provider-neutral contract,
+  scripted fake, deterministic-only provider и safe metadata.
+- [ADR 0012](../adr/0012-policy-aware-llm-routing.md) — явный HTTP lifecycle,
+  trusted schema registry, policy routing и общий budget.
+- [ADR 0013](../adr/0013-validated-llm-structure-analysis.md) — закрытый proposal
+  вместо executable model output, source aliases и обязательный M5 validator.
+- [ADR 0014](../adr/0014-hybrid-semantic-parsing.md) — три режима, bounded document
+  spans, deterministic merge/execution, confidence и preview/report semantics.
 
 ## Следующий рекомендуемый шаг
 
-Вручную создать commit M5 и PR в `main`, затем подтвердить remote CI на
-поддерживаемых версиях Python перед merge. Рекомендуемые commit/PR описывают
-bounded profiling и проверяемое deterministic ParsePlan execution, а ограничения
-исходного C3 остаются явными в PR body.
-Последующие semantic/DB/pipeline этапы планировать отдельно по ТЗ; текущий M5
-не предоставляет их через скрытый fallback. Остаточные проверки parser backends
-и реального Tika deployment остаются в [приёмке M4](../plans/M04_acceptance_audit.md).
+M6 подготовлен к ручному commit и Draft PR по [checklist](../plans/M06_llm_semantic_parsing.md#checklist-commit-pr):
+82 файла (22 tracked + 60 untracked), база `97c3154`, локальные `main`/`HEAD` совпадают.
+На шаге подготовки изменены только plan/state; commit, push и PR не создавались.
+Свежие проверки передачи: **109 docs/examples**, затем **2219 tests**, **18 integration**,
+**433 security**; lint, mypy, strict docs, lock-check и offline wheel/sdist успешны.
+Scoped audit 82 файлов не выявил признаков реальных secrets/debug/generated artifacts;
+два credential-URL совпадения — synthetic security fixtures. Все 50 ссылок на test
+functions в матрице подтверждены. Команды, состав diff и объяснения пропущенных
+проверок сохранены в checklist.
+Перед готовностью к merge закрыть K5/K7 либо явно согласовать изменение scope;
+после ручного push подтвердить remote CI на Python 3.12/3.13/3.14.
+Production PII, analyzer registry, безопасный aggregate report и router/session
+composition требуют отдельной работы;
+успех локальных tests не закрывает эти пункты. DB mapping планируется отдельно.
+Commit/push/PR этой работой не выполнялись. Остаточные проверки parser backends
+и Tika deployment остаются в [приёмке M4](../plans/M04_acceptance_audit.md).
 
 [spec-m4]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m4-technical-parsers
 [spec-fr-014]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-014-structural-profiling-и-parseplan
 [spec-m5]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m5-structural-profiler-и-deterministic-parseplan
+[spec-fr-015]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-015-llm-assisted-semantic-parsing
+[spec-m6]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m6-llm-assisted-semantic-parsing
+
+## Проверка документации M6 {#m06-docs-checks}
+
+Обновлены русские public docstring providers/router, LLM/Hybrid analyzers,
+session, document factories и contracts. Руководства M6, public API, главная
+страница и архитектура согласованы с bounded runtime; offline CSV example
+перенесён в начало semantic parsing guide. Новых архитектурных решений нет:
+используются ADR 0011–0014 и ссылки на канонические разделы ТЗ.
+
+- `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs/test_m06_examples.py`:
+  **46 passed**, включая public docstrings и три примера с запретом socket events.
+- `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs`:
+  **109 passed**; полная доступная проверка примеров документации.
+- `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs
+  packages/structuraguard/tests/unit/llm
+  packages/structuraguard/tests/unit/structure/test_document_flow.py
+  packages/structuraguard/tests/unit/structure/test_m06_document_acceptance.py`:
+  **197 passed** (4.51 s), включая fake HTTP и PDF/DOCX source provenance.
+- `make lint typecheck docs test-build`: **exit 0**; Ruff — 224 файла,
+  mypy — 222 файла, strict MkDocs со ссылками/anchors, offline wheel/sdist
+  rebuild/install и примеры из установленного core без HTTP extra успешны.
+- `git diff --check`: без замечаний.
+
+Первый расширенный docstring test нашёл четыре отсутствующих описания validator
+methods; они добавлены. Strict docs обнаружил два неверных anchors; ссылки исправлены.
+Первый document regression запуск внутри sandbox дал 195 passed и два отказа
+memory watchdog; разрешённый локальный повтор с доступом к `/bin/ps` дал 197 passed.
+Финальные команды с packaging/document backends выполнены с `UV_OFFLINE=1` и
+`UV_CACHE_DIR=/Users/katana/.cache/uv`; внешние LLM не вызывались. Live endpoints,
+semantic quality реальной модели и внешний HTTP link checker не проверялись;
+MkDocs проверяет локальные links/anchors, ссылки на ТЗ сверены с local headings.
+
+## Исправления финального review M6 {#m06-review-fix-checks}
+
+Исправлены только три findings: сохранение `NEEDS_REVIEW` для saved document
+draft, общий deadline saved-plan validation и bounded terminal report при
+заполненном issue budget. Изменены `structure/hybrid.py`, `parsing/session.py`,
+добавлен `tests/security/structure/test_m06_final_review.py`; уточнены docstring,
+semantic parsing guide и план. Публичный API, wire schemas и dependencies прежние.
+Матрица finding → regression test: [план M6](../plans/M06_llm_semantic_parsing.md#m06-final-review-fixes).
+
+Проверки выполнены сначала на новых cases, затем на затронутых suites и gates:
+
+- `uv run --locked --no-sync pytest -q packages/structuraguard/tests/security/structure/test_m06_final_review.py`:
+  **12 passed** (1.93 s), controlled clocks/events/IDs и fake providers.
+- `uv run --locked --no-sync pytest -q packages/structuraguard/tests/unit/structure
+  packages/structuraguard/tests/security/structure packages/structuraguard/tests/property/structure
+  packages/structuraguard/tests/docs/test_m06_examples.py`: **351 passed** (22.88 s).
+- `make lint typecheck`: Ruff — **225 файлов**, strict mypy — **223 файла**, без ошибок.
+- `make test`: **2219 passed** (82.84 s).
+- `make test-integration`: **18 passed / 2201 deselected** (5.09 s).
+- `make test-security`: **433 passed** (21.19 s).
+- `make docs lock-check test-build`: **exit 0**; strict MkDocs, lockfile
+  (**100 packages**) и offline wheel/sdist build/install/examples успешны.
+- `git diff --check`: без замечаний.
+
+Для полного запуска использованы `UV_OFFLINE=1`,
+`UV_CACHE_DIR=/Users/katana/.cache/uv`, `PYTEST_ADDOPTS=-q` и локальное разрешение
+для parser watchdog/packaging. Реальные LLM API не вызывались. Пять предупреждений
+full/integration suite относятся к существующим SWIG types PDF backend.
+Первая strict docs сборка обнаружила отсутствующий anchor этого раздела;
+добавлен фактический отчёт для целевой ссылки, повторная сборка прошла.
+
+Повторные `structuraguard-review` и `structuraguard-security` нового fix diff
+не выявили других существенных findings. Точные исходные blockers не входят в
+saved plan: positive penalty консервативно сохраняет review всего доступного
+document scope; manual approval API не вводился. K5/K7 остаются частичными;
+production PII, безопасный aggregate report, analyzer registry и router/session
+composition не входят в эти исправления. Live provider/TLS/proxy, полный внешний
+CVE/SCA audit и нагрузочные проверки максимальных объёмов не выполнялись.
+
+## Исторические проверки M6-C {#m06-c-checks}
+
+После review fixes полноты scope и cancellation/deadline выполнены:
+
+- Узкий analyzer/security/docs набор: `73 passed`.
+- `make lint typecheck`: Ruff — 201 файл, без замечаний; strict mypy — 199 файлов,
+  без ошибок.
+- `make test`: `2086 passed`, 78.95 s.
+- `make test-integration`: `16 passed / 2070 deselected`, 4.40 s.
+- `make test-security`: `387 passed`, 18.99 s.
+- `make docs lock-check test-build`: strict MkDocs, lockfile и isolated wheel/sdist
+  verification успешно. `git diff --check` — успешно.
+
+Запуск: `UV_OFFLINE=1 UV_CACHE_DIR=/Users/katana/.cache/uv PYTEST_ADDOPTS=-q make
+lint typecheck test test-integration test-security docs lock-check test-build`.
+Сеть для LLM не использовалась; scanner/fake clocks/HTTP transport управляются tests.
+Пять warnings полного набора относятся к SWIG types PDF dependency.
+Review и residual scope: [план M6](../plans/M06_llm_semantic_parsing.md#review-m6-c).

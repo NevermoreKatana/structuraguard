@@ -1,7 +1,7 @@
 """Строгая проверка ParsePlan с обязательным physical replay для acceptance."""
 
 import asyncio
-from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Protocol, runtime_checkable
@@ -124,7 +124,13 @@ class ParsePlanValidator:
     является capability; executor повторно проверяет policy и каждый batch.
     """
 
-    def __init__(self, *, options: ParsePlanOptions | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        options: ParsePlanOptions | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._clock = clock or (lambda: datetime.now(UTC))
         if options is not None and type(options) is not ParsePlanOptions:
             raise failure(
                 "options_type",
@@ -313,7 +319,7 @@ class ParsePlanValidator:
         metadata = dict(
             validator_id="parse_plan_validator",
             validator_version="1.0.0",
-            validated_at=datetime.now(UTC),
+            validated_at=self._clock(),
             validation_fingerprint=validation_fingerprint(request, self.options)
             if request
             else canonical_sha256_value(

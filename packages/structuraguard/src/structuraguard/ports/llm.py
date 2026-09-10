@@ -13,7 +13,13 @@ from structuraguard.contracts.reports import (
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    """Возвращает только bounded structured output без tools и DB access."""
+    """Возвращает bounded structured output без tools и DB access.
+
+    Capabilities типизированы; disabled provider всегда отклоняет generation
+    через LLM_POLICY_DENIED. Новый caller передаёт LLMPrompt с version/hash.
+    Schema capability и применение semantic schema — разные проверки:
+    structured JSON сам по себе не подтверждает ParsePlan или provenance.
+    """
 
     @property
     def capabilities(self) -> ProviderCapabilities:
@@ -28,7 +34,14 @@ class LLMProvider(Protocol):
         Returns:
             Недоверенный output с identity фактического provider и model.
 
+        Raises:
+            LLMProviderError: Нормализованный code без backend-specific details.
+            asyncio.CancelledError: Caller cancellation без скрытого retry.
+
         Side effects:
             Provider I/O принадлежит адаптеру; tools, source/DB handles и
             credentials контрактом не передаются.
+            Adapter повторно проверяет входной DTO и SecurityApproval; request,
+            response schema и prompt identity должны совпасть в результате.
+            Retry/fallback принадлежат caller/router, а не этому port.
         """

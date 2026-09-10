@@ -2403,6 +2403,10 @@ excel = [
 litellm = [
     { name = "litellm" },
 ]
+llm = [
+    { name = "httpcore" },
+    { name = "httpx" },
+]
 office = [
     { name = "defusedxml" },
     { name = "python-docx" },
@@ -2438,8 +2442,10 @@ requires-dist = [
     { name = "defusedxml", marker = "extra == 'tika'", specifier = ">=0.7.1,<1" },
     { name = "defusedxml", marker = "extra == 'xml'", specifier = ">=0.7.1,<1" },
     { name = "httpcore", marker = "extra == 'all'", specifier = "==1.0.9" },
+    { name = "httpcore", marker = "extra == 'llm'", specifier = "==1.0.9" },
     { name = "httpcore", marker = "extra == 'tika'", specifier = "==1.0.9" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28.1,<1" },
+    { name = "httpx", marker = "extra == 'llm'", specifier = ">=0.28.1,<1" },
     { name = "httpx", marker = "extra == 'tika'", specifier = ">=0.28.1,<1" },
     { name = "litellm", marker = "extra == 'all'", specifier = ">=1.75,<2" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.75,<2" },
@@ -2457,7 +2463,7 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'all'", specifier = ">=2.0.40,<3" },
     { name = "sqlalchemy", marker = "extra == 'postgres'", specifier = ">=2.0.40,<3" },
 ]
-provides-extras = ["xml", "yaml", "postgres", "pdf", "excel", "office", "litellm", "tika", "all"]
+provides-extras = ["xml", "yaml", "postgres", "pdf", "excel", "office", "litellm", "llm", "tika", "all"]
 
 [[package]]
 name = "tiktoken"

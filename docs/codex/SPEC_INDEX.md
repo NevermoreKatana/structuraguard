@@ -14,7 +14,7 @@
 | XLSX/PDF/DOCX | FR-009–FR-011, 20.13, M4 |
 | Structural profiling и ParsePlan | FR-012.1–FR-012.2, FR-014, 20.9, 20.13, M5 |
 | Database Inspector | 9, 10, 13, M7 |
-| Source Profiler | FR-013, 11.4–11.6, 12, M6 |
+| LLM-assisted semantic parsing | FR-014–FR-015, 19.1–19.4, 19.6–19.8, 20.2, 20.9–20.11, 23.5–23.8, M6 |
 | Deterministic Mapper | 10–14, M7 |
 | LLM layer | 11.8–11.9, 12, 14, 19, 20.2, 20.10–20.11, M8 |
 | MappingPlan validator | 14.1, 16, 18, 20.3–20.4, M9 |
