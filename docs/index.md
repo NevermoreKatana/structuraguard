@@ -4,11 +4,13 @@ StructuraGuard — встраиваемая Python-библиотека для �
 разнородных данных в существующие реляционные БД. Основной API асинхронный, а
 sync API предоставляется отдельной facade.
 
-## Доступность в M5
+## Доступность в M6
 
-M5 добавляет structural profiling, deterministic analyzer и проверяемое execution
-ParsePlan поверх technical parsers M4. Начните с [копируемого офлайн-примера
-CSV → NormalizedBatch](structure.md). Публично доступны:
+M6 добавляет provider-neutral semantic parsing поверх M4 extraction и M5
+profiling/validation/execution. Начните с [копируемого offline-примера
+CSV → semantic records](semantic-parsing.md#m06-offline-example).
+Режим по умолчанию — `llm_assisted`; explicit `deterministic` запрещает LLM calls.
+Публично доступны:
 
 - immutable `SDKConfig`, который принимает только явные значения и не
   использует environment как источник config;
@@ -33,7 +35,11 @@ CSV → NormalizedBatch](structure.md). Публично доступны:
   endpoint, source-bound egress approval и изоляцией сервера силами caller;
 - `StructuralProfiler`, `DeterministicStructureAnalyzer`, `ParsePlanValidator`
   и `ParsePlanExecutor` через `structuraguard.structure`, с bounded options,
-  evidence, явной неоднозначностью и physical provenance.
+  evidence, явной неоднозначностью и physical provenance;
+- `FakeLLMProvider`, `NoLLMProvider`, optional `OpenAICompatibleProvider` и
+  отдельный `PolicyAwareLLMRouter` через `structuraguard.llm`;
+- `LLMStructureAnalyzer` и `HybridStructureAnalyzer`, bounded document extraction
+  с exact source spans, `SemanticParsingSession` и `SemanticParseReport`.
 
 Обычный `import structuraguard` не загружает Pydantic: lazy top-level exports
 подгружают `SDKConfig` и facade только при явном обращении к этим
@@ -41,13 +47,16 @@ CSV → NormalizedBatch](structure.md). Публично доступны:
 
 Format adapters возвращают физические `ExtractedBatch`, не окончательные
 бизнес-сущности. Executor M5 создаёт normalized records/entities, но business
-meaning остаётся `unresolved`. DB/LLM adapters и orchestrator не реализованы. Вызов
-операции facade завершается контролируемой ошибкой
+meaning остаётся `unresolved`. M6 дополняет его проверяемыми semantic proposals;
+ненулевые значения сохраняют provenance, неоднозначность требует `NEEDS_REVIEW`.
+DB reflection/load и общая ingest facade не реализованы. Вызов операции facade
+завершается контролируемой ошибкой
 `SDK_OPERATION_NOT_IMPLEMENTED`; это не успешный placeholder. Sync-вызов внутри
 активного event loop завершается `SYNC_API_IN_ASYNC_CONTEXT`.
 
 Contracts доступны через `structuraguard.contracts`, `structuraguard.ports` и
-`structuraguard.parsers`; сервисы M5 — через `structuraguard.structure`.
+`structuraguard.parsers`; сервисы M5/M6 — через `structuraguard.structure`,
+`structuraguard.llm` и `structuraguard.parsing`.
 Корневые exports M1 не расширены. Создание facade и
 registry не сканирует installed distributions: discovery начинается только по
 явному вызову с allowlist policy. Подробнее см.
@@ -63,6 +72,12 @@ Document workers поддерживают Linux/macOS и не являются s
 M5 поддерживает закрытую policy четырёх семейств; это не произвольные expressions,
 semantic conversions или автоматический выбор неоднозначной структуры. Границы:
 [приёмка M5](plans/M05_acceptance.md) и [security semantics](security.md).
+
+M6 также имеет ограниченный scope: production PII scanner/redaction, analyzer
+registry, безопасный aggregate report целиком и router/session composition
+не реализованы. [Матрица M6](plans/M06_acceptance.md) фиксирует частичные K5/K7;
+[security review M6](plans/M06_security_review.md) — проверенные угрозы и ограничения.
+LLM получает только bounded approved payload; tools, БД и filesystem ей недоступны.
 
 Копируемые сценарии M3 показаны в примерах
 [manual registration и selection](public-api.md#m3-registry-copyable-example) и

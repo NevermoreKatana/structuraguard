@@ -254,9 +254,9 @@ class NormalizedDatasetManifest(FrozenContract):
 
     @model_validator(mode="after")
     def _validate_manifest(self) -> Self:
-        if self.schema_version not in {"1.0.0", "1.1.0"}:
+        if self.schema_version not in {"1.0.0", "1.1.0", "1.2.0"}:
             raise ValueError("неподдерживаемая версия NormalizedDatasetManifest")
-        if self.schema_version == "1.1.0":
+        if self.schema_version in {"1.1.0", "1.2.0"}:
             expected = canonical_sha256_value(
                 self, exclude_top_level=frozenset({"normalized_fingerprint"})
             )
@@ -349,7 +349,7 @@ class NormalizedDatasetManifest(FrozenContract):
 
     def _verify_fingerprint(self) -> None:
         if (
-            self.schema_version == "1.1.0"
+            self.schema_version in {"1.1.0", "1.2.0"}
             and canonical_sha256_value(
                 self, exclude_top_level=frozenset({"normalized_fingerprint"})
             )
@@ -361,7 +361,7 @@ class NormalizedDatasetManifest(FrozenContract):
         if batch.schema_version != self.schema_version:
             raise ValueError("normalized schema versions не совпадают")
         if (
-            self.schema_version == "1.1.0"
+            self.schema_version in {"1.1.0", "1.2.0"}
             and canonical_sha256_value(
                 batch, exclude_top_level=frozenset({"batch_fingerprint", "manifest"})
             )
@@ -471,9 +471,9 @@ class NormalizedBatch(FrozenContract):
 
     @model_validator(mode="after")
     def _validate_batch(self) -> Self:
-        if self.schema_version not in {"1.0.0", "1.1.0"}:
+        if self.schema_version not in {"1.0.0", "1.1.0", "1.2.0"}:
             raise ValueError("неподдерживаемая версия NormalizedBatch")
-        if self.schema_version == "1.1.0":
+        if self.schema_version in {"1.1.0", "1.2.0"}:
             expected = canonical_sha256_value(
                 self, exclude_top_level=frozenset({"batch_fingerprint", "manifest"})
             )
@@ -496,6 +496,14 @@ class NormalizedBatch(FrozenContract):
             for value in entity.values
         ):
             raise ValueError("точные origins требуют normalized schema 1.1.0")
+        if self.schema_version != "1.2.0" and any(
+            origin.source_spans
+            for record in self.records
+            for entity in record.entities
+            for value in entity.values
+            for origin in value.origins
+        ):
+            raise ValueError("Source spans требуют normalized schema 1.2.0")
         if self.is_last != (self.manifest is not None):
             raise ValueError("только terminal batch должен содержать manifest")
         if len({record.record_id for record in self.records}) != len(self.records):

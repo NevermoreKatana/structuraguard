@@ -1,9 +1,9 @@
 """Конечные бюджеты execution и точное происхождение выбранных значений."""
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from structuraguard.contracts._base import FrozenContract
 from structuraguard.contracts.common import (
@@ -14,6 +14,7 @@ from structuraguard.contracts.common import (
     PositiveInt,
     RawScalar,
 )
+from structuraguard.contracts.document_semantics import SourceTextSpan
 from structuraguard.contracts.source import SourceLocation
 from structuraguard.contracts.structure import StructuralProfilingOptions
 
@@ -46,14 +47,26 @@ class SelectionOperation(StrEnum):
     SELECT_KEY = "select_key"
     SELECT_VALUE = "select_value"
     NODE_NAME = "node_name"
+    SELECT_SPANS = "select_spans"
 
 
 class PhysicalValueOrigin(FrozenContract):
     """Raw parent value и реальная location, включая page/cell/path provenance."""
 
+    source_spans: Annotated[tuple[SourceTextSpan, ...], Field(max_length=8)] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     source_ref: PhysicalSourceRef
     raw_value: RawScalar
     location: SourceLocation
+
+    @model_validator(mode="after")
+    def _spans(self) -> Self:
+        if len(set(self.source_spans)) != len(self.source_spans) or any(
+            span.source_ref != self.source_ref for span in self.source_spans
+        ):
+            raise ValueError("Origin spans должны однозначно принадлежать source_ref")
+        return self
 
 
 class SelectionTrace(FrozenContract):

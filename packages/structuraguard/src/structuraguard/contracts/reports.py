@@ -27,9 +27,11 @@ from .common import (
     IssueSeverity,
     LoadOperation,
     NonNegativeInt,
+    PhysicalSourceRef,
     PipelineStatus,
     ProducerMetadata,
     SchemaVersionStr,
+    SemanticParsingMode,
     TransactionOutcome,
     UtcDateTime,
     ValidationDecision,
@@ -38,6 +40,9 @@ from .common import (
     _contains_credential_canary,
     _exact_data_classification_input,
 )
+from .llm import LLMCallRecord, LLMExecutionEnvironment, LLMPrompt
+from .parsing import ParsePlan
+from .semantic import SemanticConfidence
 
 _CanonicalJson = Annotated[
     str,
@@ -362,7 +367,16 @@ _OpaqueAuditRunId = Annotated[
 
 
 class SemanticParseReport(FrozenContract):
-    """Итог применения проверенного ParsePlan к extracted dataset."""
+    """Итог semantic parsing над подтверждённым physical snapshot.
+
+    В schema 1.1.0 доступны plan, mode, assessment, bounded unresolved/source refs
+    и provider attempts. COMPLETED требует terminal normalized fingerprint;
+    preview/failure не подтверждает dataset. Отсутствующий usage обозначается None,
+    provenance_coverage измеряет долю ненулевых values с refs/origins, а не полноту
+    source extraction. При отсутствии values coverage равен нулю.
+    Safe provider metadata не делает весь DTO безопасным audit payload: plan,
+    semantic names и source references могут содержать sensitive данные.
+    """
 
     schema_version: SchemaVersionStr = "1.0.0"
     run_id: IdentifierStr
@@ -370,7 +384,29 @@ class SemanticParseReport(FrozenContract):
     status: PipelineStatus
     source_fingerprint: FingerprintStr
     extraction_fingerprint: FingerprintStr
-    parse_plan_fingerprint: FingerprintStr
+    parse_plan_fingerprint: FingerprintStr | None
+    plan: ParsePlan | None = Field(default=None, exclude_if=lambda value: value is None)
+    mode: SemanticParsingMode | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    assessment: SemanticConfidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    provider_metadata: tuple[LLMCallRecord, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    source_refs: tuple[PhysicalSourceRef, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    unresolved_refs: tuple[PhysicalSourceRef, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    input_tokens: NonNegativeInt | None = Field(
+        default=0, exclude_if=lambda value: value == 0
+    )
+    output_tokens: NonNegativeInt | None = Field(
+        default=0, exclude_if=lambda value: value == 0
+    )
     normalized_fingerprint: FingerprintStr | None = None
     records: NonNegativeInt = 0
     unresolved_blocks: NonNegativeInt = 0
@@ -381,15 +417,83 @@ class SemanticParseReport(FrozenContract):
 
     @model_validator(mode="after")
     def validate_terminal_fingerprint(self) -> Self:
-        _reject_unbound_physical_issue_refs(self.issues)
+        """Проверить version, lineage, usage и terminal outcome; иначе ValueError."""
+        if self.schema_version not in {"1.0.0", "1.1.0"}:
+            raise ValueError("Неподдерживаемая версия semantic report")
+        if self.schema_version == "1.0.0":
+            _reject_unbound_physical_issue_refs(self.issues)
+            if (
+                self.parse_plan_fingerprint is None
+                or self.plan is not None
+                or self.mode is not None
+                or self.assessment is not None
+                or self.provider_metadata
+                or self.source_refs
+                or self.unresolved_refs
+                or self.input_tokens != 0
+                or self.output_tokens != 0
+            ):
+                raise ValueError("Новые report fields требуют schema 1.1.0")
+        else:
+            if self.mode is None or self.assessment is None:
+                raise ValueError("Report 1.1.0 требует mode/assessment")
+            if self.plan is not None and (
+                self.plan.fingerprint != self.parse_plan_fingerprint
+                or self.plan.source_fingerprint != self.source_fingerprint
+                or self.plan.extraction_fingerprint != self.extraction_fingerprint
+            ):
+                raise ValueError("Report plan lineage не согласована")
+            if self.llm_calls != len(self.provider_metadata):
+                raise ValueError("Число calls не согласовано с metadata")
+            input_usage = (
+                None
+                if any(call.input_tokens is None for call in self.provider_metadata)
+                else sum(call.input_tokens or 0 for call in self.provider_metadata)
+            )
+            output_usage = (
+                None
+                if any(call.output_tokens is None for call in self.provider_metadata)
+                else sum(call.output_tokens or 0 for call in self.provider_metadata)
+            )
+            if self.input_tokens != input_usage or self.output_tokens != output_usage:
+                raise ValueError("Usage не согласован")
+            known = set(self.source_refs)
+            if (
+                len(known) != len(self.source_refs)
+                or len(set(self.unresolved_refs)) != len(self.unresolved_refs)
+                or self.unresolved_blocks < len(self.unresolved_refs)
+                or not set(self.unresolved_refs) <= known
+                or any(
+                    ref not in known
+                    for issue in self.issues
+                    for ref in issue.source_refs
+                )
+            ):
+                raise ValueError("Report содержит неизвестные/duplicate refs")
+            if (
+                len(self.source_refs) > 10000
+                or len(self.provider_metadata) > 1000
+                or len(self.issues) > 1000
+            ):
+                raise ValueError("Report превышает bounded contract")
         if self.status not in _SEMANTIC_REPORT_STATUSES:
             raise ValueError("status не относится к semantic parse report")
         completed = self.status in {
             PipelineStatus.COMPLETED,
             PipelineStatus.COMPLETED_WITH_WARNINGS,
         }
-        if completed and self.normalized_fingerprint is None:
-            raise ValueError("completed semantic parse requires normalized fingerprint")
+        if (
+            completed
+            and self.schema_version == "1.1.0"
+            and (self.plan is None or self.unresolved_refs or self.unresolved_blocks)
+        ):
+            raise ValueError("Completed report требует plan и разрешённый source scope")
+        if completed and (
+            self.normalized_fingerprint is None or self.parse_plan_fingerprint is None
+        ):
+            raise ValueError(
+                "completed semantic parse requires normalized/plan fingerprints"
+            )
         if not completed and self.normalized_fingerprint is not None:
             raise ValueError(
                 "incomplete semantic parse cannot claim normalized artifact"
@@ -834,36 +938,89 @@ class SecurityScanRequest(FrozenContract):
 
 
 class ProviderCapabilities(FrozenContract):
-    """Immutable capabilities конкретной LLM-конфигурации."""
+    """Immutable capabilities конкретной LLM-конфигурации.
+
+    Неизвестные token limits не означают отсутствие лимита. JSON Schema и
+    locality объявляются явно. Legacy payload не получает новые пустые поля.
+    Disabled provider не поддерживает purposes и имеет нулевые byte budgets.
+    """
 
     provider_id: IdentifierStr
     provider_version: VersionStr
     model_id: IdentifierStr
+    deployment_fingerprint: FingerprintStr | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     structured_output: StrictBool
     supported_purposes: tuple[_LlmPurpose, ...]
-    max_input_bytes: _PayloadByteLimit
-    max_output_bytes: _PayloadByteLimit
+    max_input_bytes: Annotated[StrictInt, Field(ge=0, le=1_048_576)]
+    max_output_bytes: Annotated[StrictInt, Field(ge=0, le=1_048_576)]
+    json_schema: StrictBool = Field(default=False, exclude_if=lambda value: not value)
+    tool_calling: StrictBool = Field(default=False, exclude_if=lambda value: not value)
+    execution_environment: LLMExecutionEnvironment = Field(
+        default=LLMExecutionEnvironment.UNKNOWN,
+        exclude_if=lambda value: value == LLMExecutionEnvironment.UNKNOWN,
+    )
+    max_input_tokens: Annotated[StrictInt, Field(gt=0, le=10_000_000)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    max_output_tokens: Annotated[StrictInt, Field(gt=0, le=10_000_000)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    context_window_tokens: Annotated[StrictInt, Field(gt=0, le=10_000_000)] | None = (
+        Field(default=None, exclude_if=lambda value: value is None)
+    )
 
     @model_validator(mode="after")
     def validate_purposes(self) -> Self:
+        """Проверить purposes и согласованность disabled/token caps; иначе ValueError."""
+        if self.execution_environment is LLMExecutionEnvironment.DISABLED:
+            if (
+                self.structured_output
+                or self.json_schema
+                or self.tool_calling
+                or self.supported_purposes
+                or self.max_input_bytes
+                or self.max_output_bytes
+                or self.max_input_tokens is not None
+                or self.max_output_tokens is not None
+                or self.context_window_tokens is not None
+            ):
+                raise ValueError(
+                    "Disabled provider не может объявлять generation capability"
+                )
+            return self
         if not self.structured_output:
             raise ValueError("LLM provider must support structured output")
         if not self.supported_purposes:
             raise ValueError("LLM provider must declare at least one purpose")
         if len(set(self.supported_purposes)) != len(self.supported_purposes):
             raise ValueError("LLM provider contains duplicate purposes")
+        if not self.max_input_bytes or not self.max_output_bytes:
+            raise ValueError("Активный provider требует положительные byte budgets")
+        if self.context_window_tokens is not None and any(
+            limit is not None and limit > self.context_window_tokens
+            for limit in (self.max_input_tokens, self.max_output_tokens)
+        ):
+            raise ValueError("Token limit превышает context window")
         return self
 
 
 class LLMRequest(FrozenContract):
-    """Minimized structured request без tools, credentials и handles."""
+    """Minimized structured request с exact approval, prompt и schema identity.
+
+    Canonical payload и routing/classification/redaction lineage связываются hashes;
+    несогласованный DTO даёт Pydantic ValidationError без I/O. Tools, credentials
+    и handles запрещены. payload_json исключён из repr, но присутствует при
+    serialization и может содержать PII: весь request нельзя считать safe metadata.
+    """
 
     request_id: IdentifierStr
     run_id: IdentifierStr
     purpose: _LlmPurpose
     response_schema_id: IdentifierStr
     response_schema_version: VersionStr
-    payload_json: _CanonicalJson
+    payload_json: _CanonicalJson = Field(repr=False)
     payload_fingerprint: FingerprintStr
     content_fingerprint: FingerprintStr
     data_classification: DataClassification
@@ -872,6 +1029,9 @@ class LLMRequest(FrozenContract):
     redaction_fingerprint: FingerprintStr
     security_approval: SecurityApproval
     prompt_fingerprint: FingerprintStr
+    prompt: LLMPrompt | None = Field(
+        default=None, repr=False, exclude_if=lambda value: value is None
+    )
     max_output_bytes: _PayloadByteLimit
 
     _exact_classification = field_validator("data_classification", mode="before")(
@@ -881,6 +1041,12 @@ class LLMRequest(FrozenContract):
 
     @model_validator(mode="after")
     def validate_payload_fingerprint(self) -> Self:
+        """Сверить prompt, payload и все bindings approval; иначе ValueError."""
+        if (
+            self.prompt is not None
+            and self.prompt.fingerprint != self.prompt_fingerprint
+        ):
+            raise ValueError("prompt metadata fingerprint mismatch")
         if self.payload_fingerprint != _json_fingerprint(self.payload_json):
             raise ValueError("payload fingerprint does not match canonical JSON")
         security_report = self.security_approval.report
@@ -907,7 +1073,12 @@ class LLMRequest(FrozenContract):
 
 
 class LLMResponse(FrozenContract):
-    """Bounded structured output с identity фактического provider/model."""
+    """Недоверенный structured output с provider/model identity, usage и prompt.
+
+    Canonical output и fingerprints проверяются DTO без I/O; schema и source
+    grounding обязан проверить caller. output_json скрыт из repr, но сериализуется
+    и не является safe audit data. Несогласованные hashes дают ValidationError.
+    """
 
     request_id: IdentifierStr
     provider_id: IdentifierStr
@@ -915,8 +1086,11 @@ class LLMResponse(FrozenContract):
     model_id: IdentifierStr
     response_schema_id: IdentifierStr
     response_schema_version: VersionStr
-    output_json: _CanonicalJson
+    output_json: _CanonicalJson = Field(repr=False)
     prompt_fingerprint: FingerprintStr
+    prompt: LLMPrompt | None = Field(
+        default=None, repr=False, exclude_if=lambda value: value is None
+    )
     generation_fingerprint: FingerprintStr
     finish_reason: IdentifierStr
     input_tokens: NonNegativeInt
@@ -927,6 +1101,12 @@ class LLMResponse(FrozenContract):
 
     @model_validator(mode="after")
     def validate_output_fingerprint(self) -> Self:
+        """Сверить prompt и generation hash с canonical output; иначе ValueError."""
+        if (
+            self.prompt is not None
+            and self.prompt.fingerprint != self.prompt_fingerprint
+        ):
+            raise ValueError("prompt metadata fingerprint mismatch")
         if self.generation_fingerprint != _json_fingerprint(self.output_json):
             raise ValueError("generation fingerprint does not match canonical output")
         return self

@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator
 
 from structuraguard.contracts._base import canonical_sha256_value
 from structuraguard.contracts.common import ProducerMetadata
+from structuraguard.contracts.document_semantics import DocumentSpanSelector
 from structuraguard.contracts.execution import (
     ExecutionStage,
     ParsePlanOptions,
@@ -64,6 +65,14 @@ class _Output:
             component_id="parse_plan_executor",
             component_version="1.0.0",
             sdk_version="0.3.0",
+        )
+        self.schema_version = (
+            "1.2.0"
+            if any(
+                isinstance(f.selector, DocumentSpanSelector)
+                for f in checked.plan.fields
+            )
+            else "1.1.0"
         )
 
     def normalized(self, selected: SelectedRecord) -> NormalizedRecord:
@@ -147,7 +156,7 @@ class _Output:
                 stage=ExecutionStage.LIMIT,
             )
         prototype = NormalizedBatch(
-            schema_version="1.1.0",
+            schema_version=self.schema_version,
             source=self.checked.source,
             extraction_id=self.checked.manifest.extraction_id,
             extraction_fingerprint=self.checked.manifest.extraction_fingerprint,
@@ -174,16 +183,18 @@ class _Output:
         self.summaries.append(summary)
         fields = {f.field_id: f for f in self.checked.plan.fields}
         schema = tuple(
-            SemanticField(
-                entity_type=entity.entity_type,
-                field_name=fields[field_id].semantic_name,
-                semantic_type=fields[field_id].semantic_type,
+            dict.fromkeys(
+                SemanticField(
+                    entity_type=entity.entity_type,
+                    field_name=fields[field_id].semantic_name,
+                    semantic_type=fields[field_id].semantic_type,
+                )
+                for entity in self.checked.plan.entities
+                for field_id in entity.field_ids
             )
-            for entity in self.checked.plan.entities
-            for field_id in entity.field_ids
         )
         manifest = NormalizedDatasetManifest(
-            schema_version="1.1.0",
+            schema_version=self.schema_version,
             source=self.checked.source,
             extraction_id=self.checked.manifest.extraction_id,
             extraction_fingerprint=self.checked.manifest.extraction_fingerprint,

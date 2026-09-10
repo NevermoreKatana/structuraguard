@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+from structuraguard.contracts._base import canonical_sha256_value
 from structuraguard.contracts.analysis import (
     ExplicitRecordGrouping,
     LogRecordSelector,
@@ -17,6 +18,11 @@ from structuraguard.contracts.common import (
     PhysicalSourceRef,
     RawScalar,
     StringScalar,
+)
+from structuraguard.contracts.document_semantics import (
+    DocumentSpanGrouping,
+    DocumentSpanSelector,
+    SourceTextSpan,
 )
 from structuraguard.contracts.execution import (
     ExecutionStage,
@@ -52,6 +58,7 @@ from structuraguard.contracts.source import (
 from structuraguard.exceptions import SecurityPolicyError, StructuralProfilingError
 from structuraguard.structure._plan_check import failure, record_steps
 from structuraguard.structure._stream import StreamCheck
+from structuraguard.structure.text_sources import text_sources
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +178,21 @@ class PlanRuntime:
         self.tree_buffer_ids: set[str] = set()
         self.root_stamp: tuple[str, str | None, str, str | None, str] | None = None
         self.tree_root_counts: dict[str, int] = {}
+        self.span_values: dict[SourceTextSpan, tuple[str, PhysicalValueOrigin]] = {}
+        self.is_span_plan = isinstance(self.plan, DocumentParsePlan) and all(
+            isinstance(f.selector, DocumentSpanSelector) for f in self.plan.fields
+        )
+        self.span_index: dict[PhysicalSourceRef, set[SourceTextSpan]] = {}
+        self.span_bytes = 0
+        if self.is_span_plan:
+            for field in self.plan.fields:
+                assert isinstance(field.selector, DocumentSpanSelector)
+                for span in field.selector.spans:
+                    self.span_index.setdefault(span.source_ref, set()).add(span)
+            for entity in self.plan.entities:
+                assert isinstance(entity.grouping, DocumentSpanGrouping)
+                span = entity.grouping.anchor
+                self.span_index.setdefault(span.source_ref, set()).add(span)
         self.scope_position = 0
         self.physical_position = 0
         self.pending: list[
@@ -273,6 +295,9 @@ class PlanRuntime:
             selected = self._table(checked)
         elif isinstance(self.plan, TreeParsePlan):
             selected = self._tree(checked)
+        elif self.is_span_plan:
+            self._collect_spans(checked)
+            selected = iter(())
         else:
             selected = self._physical_groups(checked)
         for record in selected:
@@ -810,6 +835,116 @@ class PlanRuntime:
                     child_definition, match, index, selected, nodes, children, budget
                 )
 
+    def _collect_spans(self, batch: ExtractedBatch) -> None:
+        for source in text_sources(batch):
+            for span in self.span_index.get(source.ref, ()):
+                if span.end > len(source.text):
+                    raise failure("span_outside_source")
+                text = source.text[span.start : span.end]
+                if canonical_sha256_value(text) != span.text_fingerprint:
+                    raise failure("span_quote_mismatch")
+                self.span_bytes += (
+                    len(text.encode())
+                    + len(source.location.canonical_json().encode())
+                    + 256
+                )
+                if self.span_bytes > self.options.max_output_batch_bytes:
+                    raise failure(
+                        "span_buffer_limit",
+                        code="SECURITY_LIMIT_EXCEEDED",
+                        stage=ExecutionStage.LIMIT,
+                    )
+                self.span_values[span] = (
+                    text,
+                    PhysicalValueOrigin(
+                        source_ref=source.ref,
+                        raw_value=StringScalar(value=text),
+                        location=source.location,
+                        source_spans=(span,),
+                    ),
+                )
+            for field in self.plan.fields:
+                selector = field.selector
+                assert isinstance(selector, DocumentSpanSelector)
+                if any(span.source_ref == source.ref for span in selector.spans):
+                    self._observe(field, source.ref)
+
+    def _span_records(self) -> Iterator[SelectedRecord]:
+        groups: dict[str, list[ParseEntity]] = {}
+        for entity in self.plan.entities:
+            assert isinstance(entity.grouping, DocumentSpanGrouping)
+            if entity.grouping.anchor not in self.span_values:
+                raise failure("span_anchor_missing")
+            groups.setdefault(entity.grouping.record_id, []).append(entity)
+        for definitions in groups.values():
+            selected: list[SelectedEntity] = []
+            positions: dict[str, int] = {}
+            pending = list(definitions)
+            budget = _RecordBudget(self.options)
+            while pending:
+                ready = next(
+                    (
+                        e
+                        for e in pending
+                        if e.parent_entity_id is None or e.parent_entity_id in positions
+                    ),
+                    None,
+                )
+                if ready is None:
+                    raise failure("span_parent_cycle")
+                pending.remove(ready)
+                budget.entity()
+                values: list[SelectedValue] = []
+                for field in self.plan.fields:
+                    if field.field_id not in ready.field_ids:
+                        continue
+                    selector = field.selector
+                    assert isinstance(selector, DocumentSpanSelector)
+                    if any(span not in self.span_values for span in selector.spans):
+                        raise failure("span_source_missing")
+                    parts = [self.span_values[span] for span in selector.spans]
+                    by_ref: dict[PhysicalSourceRef, list[PhysicalValueOrigin]] = {}
+                    for _, origin in parts:
+                        by_ref.setdefault(origin.source_ref, []).append(origin)
+                    origins = tuple(
+                        PhysicalValueOrigin(
+                            source_ref=ref,
+                            location=items[0].location,
+                            raw_value=StringScalar(
+                                value=" ".join(
+                                    str(item.raw_value.value) for item in items
+                                )
+                            ),
+                            source_spans=tuple(
+                                span for item in items for span in item.source_spans
+                            ),
+                        )
+                        for ref, items in by_ref.items()
+                    )
+                    raw = StringScalar(value=" ".join(text for text, _ in parts))
+                    value = SelectedValue(
+                        field, raw, raw, origins, SelectionOperation.SELECT_SPANS
+                    )
+                    budget.append(values, value)
+                positions[ready.entity_id] = len(selected)
+                selected.append(
+                    SelectedEntity(
+                        ready,
+                        tuple(values),
+                        positions.get(ready.parent_entity_id)
+                        if ready.parent_entity_id
+                        else None,
+                    )
+                )
+            self.record_count += 1
+            if self.record_count > self.options.max_records:
+                raise failure(
+                    "records_limit",
+                    code="SECURITY_LIMIT_EXCEEDED",
+                    stage=ExecutionStage.LIMIT,
+                )
+            yield SelectedRecord(tuple(selected))
+
     def finish(self) -> Iterator[SelectedRecord]:
         try:
             manifest = self.check.finish()
@@ -839,6 +974,8 @@ class PlanRuntime:
         elif isinstance(plan, TreeParsePlan):
             if not self.root_seen or not self.tree_path_seen or self.tree_buffer:
                 raise failure("record_path_missing_or_incomplete")
+        elif self.is_span_plan:
+            yield from self._span_records()
         else:
             if self.scope_position != len(self.scope):
                 raise failure("physical_scope_missing")

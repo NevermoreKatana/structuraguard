@@ -1,7 +1,12 @@
 # Публичный API StructuraGuard
 
+LLM M6-A/B: [FakeLLMProvider, NoLLMProvider, OpenAICompatibleProvider и routing](llm.md).
+M6-C/D: [LLMStructureAnalyzer](llm-semantic-parsing.md) и
+[SemanticParsingSession с offline-примером](semantic-parsing.md).
+Общая SDK facade пока не реализует LLM orchestration.
+
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
-текущей реализации M4 и этапов M5-A/B/C. Facade-операции pipeline в эту
+текущей реализации M4, M5-A/B/C и bounded M6-A/B/C/D. Facade-операции pipeline в эту
 поставку не входят.
 
 Начните с [копируемого примера CSV → NormalizedBatch](structure.md).
@@ -1357,3 +1362,50 @@ evidence scaffold находится в [плане M1](plans/M01_sdk_scaffold.m
 [spec-fr-014]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-014-structural-profiling-и-parseplan
 [spec-m5]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m5-structural-profiler-и-deterministic-parseplan
 [spec-nfr-006]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#nfr-006-streaming
+
+
+## LLMStructureAnalyzer M6-C
+
+`structuraguard.structure` экспортирует `LLMStructureAnalyzer`, `semantic_prompt`
+и `semantic_response_schema`. `structuraguard.contracts` экспортирует
+`LLMStructurePolicy`, `LLMAnalysisContext`, strict `LLMStructureSuggestion`,
+`SemanticPlanProposal`, `SemanticFieldProposal`, `SemanticEntityProposal`,
+`SemanticSelector`, `SemanticPathStep` и `LLMPlanProvenance`.
+
+Вход — существующий `StructureAnalysisRequest`, полный replay factory и trusted
+provider/scanner/validator dependencies. Успех — `StructurePlanCreated` после
+настоящей physical validation; ambiguity/low score/incomplete scope —
+`StructureNeedsReview`; provider/security/plan errors остаются typed failures.
+`ParsePlan.semantic_analysis` и `ParseField.locale_hint` доступны в schema 1.1.0;
+при отсутствии legacy wire/hashes сохраняются.
+
+Полный вызов, modes, budgets, provenance и ограничения:
+[semantic parsing C](llm-semantic-parsing.md). Hybrid orchestration, chunk entity
+extraction, saved plan replay и SemanticParseReport реализованы в
+[semantic parsing D](semantic-parsing.md); DB mapping не добавлен.
+
+## HybridStructureAnalyzer и SemanticParsingSession M6-D
+
+`structuraguard.parsing` экспортирует session, analyzer, ParsingPolicy и SemanticConfidence.
+Default mode `llm_assisted`; deterministic branch не вызывает provider.
+Public методы: `analyze_structure`, `create_parse_plan`, `validate_parse_plan`,
+`parse_semantically(plan=None)`, `aclose`. Успешный анализ кэшируется; analysis
+exception/cancellation закрывает session для нового запуска, чтобы не сбросить
+budget. Сохранённый plan в новой session проверяется и применяется без LLM.
+`report` формируется при потреблении parsing iterator после подтверждения physical
+snapshot; один вызов `analyze_structure()` report не создаёт. Пустой source даёт
+`NEEDS_REVIEW` / `SOURCE_EMPTY`, без plan, output records и LLM calls.
+Новые document spans и final_assessment требуют ParsePlan 1.2.0; normalized spans
+также требуют 1.2.0. SemanticParseReport 1.1.0 допускает отсутствие плана только
+для незавершённых outcomes; completed report требует terminal fingerprint.
+`NEEDS_REVIEW` не выдаёт terminal batch: частичные records остаются preview.
+Safe provider attempts можно использовать для диагностики; весь plan/report
+с source references и semantic names нельзя считать безопасным audit payload.
+Production PII scanner/redaction и `structure_analyzers.register(...)` не реализованы;
+router M6-B не подставляется вместо конкретного provider в session.
+Полные contracts, samples/chunks, preview semantics и limits:
+[semantic parsing](semantic-parsing.md), [ADR 0014](adr/0014-hybrid-semantic-parsing.md).
+Канонический scope: [FR-015][spec-fr-015] и [M6][spec-m6].
+
+[spec-fr-015]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-015-llm-assisted-semantic-parsing
+[spec-m6]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m6-llm-assisted-semantic-parsing

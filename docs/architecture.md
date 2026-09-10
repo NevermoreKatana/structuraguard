@@ -589,3 +589,19 @@ cleanup. Raw parent values и точные locations сохраняются в `
 Неоконченные batches требуют downstream staging; LLM и database writes отсутствуют.
 Ресурсные границы и совместимость: [ADR 0010](adr/0010-verified-parse-plan-execution.md),
 [security](security.md), [API](public-api.md#parseplanvalidator-parseplanexecutor-m5-c).
+
+### Bounded semantic parsing M6
+
+`LLMStructureAnalyzer` передаёт provider только approved sample и компилирует
+закрытый response в ParsePlan. `HybridStructureAnalyzer` выбирает deterministic
+или LLM branch, обрабатывает document chunks и проверяет exact source spans.
+`SemanticParsingSession` кэширует анализ одного run, применяет plan общим M5
+executor и подтверждает dataset только после terminal batch. Provider lifecycle
+остаётся у приложения; отдельный policy router не является provider для session.
+DB mapping, production PII scanner и общая facade в этот runtime не входят.
+
+Публичный сценарий и ограничения: [semantic parsing M6](semantic-parsing.md).
+Долгоживущие решения: [provider contract](adr/0011-llm-provider-foundation.md),
+[HTTP/routing](adr/0012-policy-aware-llm-routing.md),
+[проверка proposal](adr/0013-validated-llm-structure-analysis.md) и
+[Hybrid/spans/report](adr/0014-hybrid-semantic-parsing.md).

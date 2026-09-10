@@ -45,6 +45,9 @@ nav:
   - Архитектура: architecture.md
   - Публичный API: public-api.md
   - Структурный разбор M5: structure.md
+  - LLM providers и routing M6: llm.md
+  - LLM semantic parsing M6: llm-semantic-parsing.md
+  - Hybrid semantic parsing M6: semantic-parsing.md
   - Безопасность ParsePlan: security.md
   - Модель угроз: threat-model.md
   - ADR:
@@ -58,6 +61,10 @@ nav:
       - Bounded structural profiling: adr/0008-bounded-structural-profiling.md
       - Deterministic structure analysis: adr/0009-deterministic-structure-analysis.md
       - Проверяемое ParsePlan execution: adr/0010-verified-parse-plan-execution.md
+      - Provider foundation и disabled LLM: adr/0011-llm-provider-foundation.md
+      - HTTP provider и policy-aware routing: adr/0012-policy-aware-llm-routing.md
+      - Проверка LLM ParsePlan: adr/0013-validated-llm-structure-analysis.md
+      - Hybrid parsing и document spans: adr/0014-hybrid-semantic-parsing.md
   - Планы:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
@@ -69,3 +76,4 @@ nav:
       - M05 — structural parsing: plans/M05_parse_plan.md
       - M05 — аудит приёмки: plans/M05_acceptance.md
       - M05 — security review: plans/M05_security_review.md
+      - M06 — LLM semantic parsing: plans/M06_llm_semantic_parsing.md

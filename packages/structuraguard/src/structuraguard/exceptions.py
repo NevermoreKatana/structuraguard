@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from structuraguard.contracts.execution import ParseExecutionIssue
+    from structuraguard.contracts.llm import LLMCallRecord, LLMErrorCode
 
 type ErrorDetailScalar = str | int | float | bool | None
 type ErrorDetailInput = (
@@ -293,6 +294,32 @@ class SourceError(StructuraGuardError):
 
 class ParserError(StructuraGuardError):
     """Ошибка определения формата или разбора источника."""
+
+
+class LLMProviderError(StructuraGuardError):
+    """Typed provider failure без исходного ответа, exception body и secrets.
+
+    Args:
+        code: Нормализованный код отказа.
+        call: Optional безопасная запись попытки; может отсутствовать и после вызова,
+            если граница router/analyzer/run отбросила недоверенный attached record.
+
+    Повтор допустим только для transient timeout/rate-limit/unavailable;
+    решение о retry принимает caller с собственным общим budget.
+    Для истории используйте safe provider/router/session attempts; code сохраняется
+    отдельно от диагностик исходного backend.
+    """
+
+    def __init__(
+        self, code: LLMErrorCode, *, call: LLMCallRecord | None = None
+    ) -> None:
+        self.call = call
+        super().__init__(
+            error_code=code.value,
+            message="LLM provider не завершил запрос",
+            retryable=code.value
+            in {"LLM_TIMEOUT", "LLM_RATE_LIMIT", "LLM_UNAVAILABLE"},
+        )
 
 
 class StructuralAnalysisError(StructuraGuardError):

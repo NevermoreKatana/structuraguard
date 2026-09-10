@@ -12,6 +12,10 @@ from structuraguard.contracts.analysis import (
     TreePathOperation,
     TreeStep,
 )
+from structuraguard.contracts.document_semantics import (
+    DocumentSpanGrouping,
+    DocumentSpanSelector,
+)
 from structuraguard.contracts.execution import (
     ExecutionStage,
     ParseExecutionIssue,
@@ -224,6 +228,11 @@ def static_plan(request: ParsePlanValidationRequest, options: ParsePlanOptions) 
                 s.operation is TreePathOperation.ITEM for s in selector.steps
             ):
                 unsupported("field_cardinality")
+    elif isinstance(plan, DocumentParsePlan) and all(
+        isinstance(f.selector, DocumentSpanSelector) for f in plan.fields
+    ):
+        if not all(isinstance(e.grouping, DocumentSpanGrouping) for e in plan.entities):
+            unsupported("span_grouping")
     else:
         if any(e.parent_entity_id is not None for e in plan.entities):
             unsupported("physical_group_parent")

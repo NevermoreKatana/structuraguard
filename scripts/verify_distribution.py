@@ -47,6 +47,17 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/contracts/common.py",
         "structuraguard/contracts/database.py",
         "structuraguard/contracts/execution.py",
+        "structuraguard/contracts/document_semantics.py",
+        "structuraguard/parsing/__init__.py",
+        "structuraguard/parsing/session.py",
+        "structuraguard/llm/run.py",
+        "structuraguard/structure/hybrid.py",
+        "structuraguard/structure/chunking.py",
+        "structuraguard/structure/document_entities.py",
+        "structuraguard/structure/text_sources.py",
+        "structuraguard/structure/semantic_request.py",
+        "structuraguard/contracts/llm.py",
+        "structuraguard/contracts/semantic.py",
         "structuraguard/contracts/mapping.py",
         "structuraguard/contracts/normalized.py",
         "structuraguard/contracts/parsing.py",
@@ -58,6 +69,14 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/domain/canonical.py",
         "structuraguard/domain/lineage.py",
         "structuraguard/exceptions.py",
+        "structuraguard/llm/__init__.py",
+        "structuraguard/llm/_boundary.py",
+        "structuraguard/llm/_structured.py",
+        "structuraguard/llm/_http.py",
+        "structuraguard/llm/openai_compatible.py",
+        "structuraguard/llm/router.py",
+        "structuraguard/llm/fake.py",
+        "structuraguard/llm/no_llm.py",
         "structuraguard/structure/__init__.py",
         "structuraguard/structure/_observations.py",
         "structuraguard/structure/_plan_check.py",
@@ -65,6 +84,9 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/structure/_samples.py",
         "structuraguard/structure/_stream.py",
         "structuraguard/structure/analysis.py",
+        "structuraguard/structure/llm_analysis.py",
+        "structuraguard/structure/plan_compilation.py",
+        "structuraguard/structure/semantic_samples.py",
         "structuraguard/structure/document.py",
         "structuraguard/structure/execution.py",
         "structuraguard/structure/planning.py",
@@ -173,6 +195,32 @@ _CONTRACT_EXPORTS = frozenset(
         "IntegerScalar",
         "IssueSeverity",
         "JsonPointerLocation",
+        "LLMBudget",
+        "LLMRoutePolicy",
+        "LLMRoutingMode",
+        "LLMRoutingPolicy",
+        "LLMCallRecord",
+        "LLMPlanProvenance",
+        "LLMAnalysisContext",
+        "LLMStructurePolicy",
+        "ParsingPolicy",
+        "SemanticConfidence",
+        "DocumentEntityProposal",
+        "DocumentEntitySuggestion",
+        "DocumentFieldProposal",
+        "DocumentSpanGrouping",
+        "DocumentSpanSelector",
+        "QuotedSpan",
+        "SourceTextSpan",
+        "LLMStructureSuggestion",
+        "SemanticEntityProposal",
+        "SemanticFieldProposal",
+        "SemanticPathStep",
+        "SemanticPlanProposal",
+        "SemanticSelector",
+        "LLMErrorCode",
+        "LLMExecutionEnvironment",
+        "LLMPrompt",
         "LLMRequest",
         "LLMResponse",
         "LineRangeLocation",
@@ -296,6 +344,13 @@ _PORT_EXPORTS = frozenset(
 _STRUCTURE_EXPORTS = frozenset(
     {
         "DeterministicStructureAnalyzer",
+        "HybridAnalysis",
+        "HybridStructureAnalyzer",
+        "document_prompt",
+        "document_response_schema",
+        "LLMStructureAnalyzer",
+        "semantic_prompt",
+        "semantic_response_schema",
         "ParsePlanExecutor",
         "ParsePlanOptions",
         "ParsePlanValidator",
@@ -361,6 +416,7 @@ _OPTIONAL_DEPENDENCIES = {
     "excel": frozenset({"openpyxl", "defusedxml"}),
     "office": frozenset({"python-docx", "defusedxml"}),
     "litellm": frozenset({"litellm"}),
+    "llm": frozenset({"httpx", "httpcore"}),
     "tika": frozenset({"httpx", "httpcore", "defusedxml"}),
 }
 _EXPECTED_EXTRAS = frozenset({*_OPTIONAL_DEPENDENCIES, "all"})
@@ -1362,13 +1418,34 @@ def _probe_source(
     forbidden_json = json.dumps(sorted(_FORBIDDEN_DEPENDENCIES))
     optional_json = json.dumps(sorted(_FORBIDDEN_OPTIONAL_IMPORTS))
     runtime_versions_json = json.dumps(expected_runtime_versions, sort_keys=True)
-    return textwrap.dedent(
-        f"""
+    offline_examples = []
+    for path, marker in (
+        ("docs/llm.md", "m06-provider"),
+        ("docs/semantic-parsing.md", "m06-session"),
+    ):
+        documentation = (repository_root / path).read_text(encoding="utf-8")
+        match = re.search(
+            rf"<!-- example:{marker}:start -->\s*```python\n(?P<code>.*?)\n```",
+            documentation,
+            flags=re.DOTALL,
+        )
+        if match is None:
+            raise ValueError(f"Отсутствует offline example {marker}")
+        offline_examples.append(match.group("code"))
+    return (
+        textwrap.dedent(
+            f"""
         import importlib.metadata as metadata
         import json
         import pathlib
         import re
         import sys
+
+        def deny_network(event, args):
+            if event in {{"socket.connect", "socket.getaddrinfo"}}:
+                raise AssertionError("Network запрещена в installed smoke")
+
+        sys.addaudithook(deny_network)
 
         expected_exports = set(json.loads({exports_json!r}))
         expected_contract_exports = set(json.loads({contract_exports_json!r}))
@@ -1419,12 +1496,23 @@ def _probe_source(
             raise SystemExit(f"missing top-level exports: {{missing}}")
 
         import structuraguard.contracts as contracts
+        import structuraguard.llm as llm
         import structuraguard.domain as domain
         import structuraguard.parsers as parsers
         import structuraguard.parsers.builtin as builtin_parsers
         import structuraguard.parsers.tika as tika_parser
         import structuraguard.ports as ports
         import structuraguard.structure as structure
+        import structuraguard.parsing as semantic_parsing
+
+        if set(llm.__all__) != {{"FakeLLMProvider", "NoLLMProvider", "ScriptedFailure", "ScriptedResponse", "LLMPromptTemplate", "LLMResponseSchema", "OpenAICompatibleConfig", "OpenAICompatibleHeader", "OpenAICompatibleProvider", "PolicyAwareLLMRouter"}}:
+            raise SystemExit("unexpected LLM exports")
+        if llm.NoLLMProvider().capabilities.structured_output:
+            raise SystemExit("NoLLMProvider must remain disabled")
+        if set(semantic_parsing.__all__) != {{"HybridStructureAnalyzer", "ParsingPolicy", "SemanticConfidence", "SemanticParsingSession"}}:
+            raise SystemExit("unexpected semantic parsing exports")
+        if not isinstance(llm.NoLLMProvider(), ports.LLMProvider):
+            raise SystemExit("NoLLMProvider must implement LLMProvider")
 
         if tika_parser.TikaParserAdapter().config.enabled:
             raise SystemExit("Tika must remain opt-in")
@@ -1464,7 +1552,19 @@ def _probe_source(
             raise SystemExit(f"forbidden dependency imported: {{forbidden_loaded}}")
         print(f"installed smoke OK: {{module_path}}")
         """
-    ).strip()
+        ).strip()
+        + "\n\n"
+        + "\n\n".join(offline_examples)
+        + textwrap.dedent(
+            """
+
+        loaded_roots = {name.partition(".")[0].lower() for name in sys.modules}
+        if loaded_roots & (forbidden_roots | optional_roots):
+            raise SystemExit("offline examples imported optional dependencies")
+        print("installed offline examples OK")
+        """
+        )
+    )
 
 
 def _verify_installed_wheel(
