@@ -2,6 +2,86 @@
 
 Обновлено: 2026-09-11.
 
+## M9 — Deterministic DB Mapper
+
+Текущий milestone реализован локально: `CandidateMapper.rank` и
+`DeterministicMapper` принимают готовые M8/M7 snapshots, явный `MappingScope`
+и optional Semantic Catalog. SDK вычисляет explainable scores, ограничивает
+список candidates, сохраняет ambiguity, lineage и детерминированный порядок.
+Поддержаны ru/en names/aliases, type/pattern compatibility, source context,
+ordered FK evidence и настраиваемые валидируемые веса/бюджеты.
+
+[API, копируемые примеры и ограничения](../deterministic-mapping.md),
+[план M9](../plans/M09_deterministic_mapper.md),
+[матрица приёмки](../plans/M09_acceptance.md),
+[security review](../plans/M09_security_review.md),
+[ADR 0019](../adr/0019-deterministic-mapping-candidates.md).
+Канонический scope: [M9 в ТЗ](https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m9-deterministic-db-mapper).
+
+Тестовый аудит добавил 76 сценариев и исправил потерю FK blocker при parent
+вне scope. Последующий security review добавил 8 сценариев и исправил Medium:
+FK/identity обходы теперь учитываются в operation budget до выполнения работы.
+Подтверждённые проверки security-этапа на Python 3.12.9: **147 M9**, **2886 total**,
+**23 integration**, **632 security**; lint/typecheck, strict docs и offline
+wheel/sdist verification прошли. Offline evaluation на 24 синтетических случаях
+воспроизводится; production accuracy из этих результатов не следует.
+
+Документация M9 описывает русские public docstrings, два независимо копируемых
+snippets, различия DTO ValidationError и ошибок rank, scope/PII/FK semantics.
+Новый ADR не добавлялся: долгоживущее решение уже зафиксировано в ADR 0019.
+В SPEC_INDEX исправлены ссылки milestone: Deterministic Mapper — M9,
+MappingPlan Validator — M11; validator не относится к готовому M9.
+Проверки шага документации:
+
+- `uv run --locked --no-sync pytest packages/structuraguard/tests/docs/test_m09_examples.py -q`
+  — **4 passed**: оба snippets копируются независимо, scope fail-closed,
+  ru/en aliases, safe summary и отсутствие сетевых вызовов.
+- `uv run --locked --no-sync pytest packages/structuraguard/tests/docs -q`
+  — **117 passed**, весь доступный набор документационных примеров.
+- `make lint typecheck docs` — **335 formatted files**, **331 mypy files**,
+  strict MkDocs build с проверкой внутренних ссылок/anchors без ошибок.
+- 6 ссылок на канонические разделы ТЗ сверены с локальными заголовками;
+  AST без docstrings четырёх public API modules не изменился;
+  `git diff --check` прошёл.
+
+На шаге документации полный runtime suite/build не повторялся: исполняемый
+код не изменён, свежие результаты предшествующего security-этапа приведены выше.
+Внешние URLs не проверялись по сети; реальные LLM API не вызывались.
+
+LLM/embeddings, генерация/validation MappingPlan, SQL, staging, загрузка и
+автоматическое подключение mapper к общей SDK facade не входят в готовое M9.
+`auto_candidate` не является approval. Caller отвечает за происхождение
+snapshots, scope и свежесть schema/grants перед будущей загрузкой. Operation
+budgets не гарантируют wall-clock deadline или точный RSS.
+
+После финального review исправлены ещё два Medium: confusable target больше
+не становится anchor, а имена и aliases таблиц вне candidate scope не вызывают
+ошибку tokenizer. Scope/writability checks применяются до нормализации таблицы;
+FK metadata сохранена. Regression/control cases: **7 failed, 3 passed** до
+исправлений, **10 passed** после. Повторный review существенных findings не выявил.
+
+Актуальные проверки после исправлений: **161 M9 с примерами**, **2900 total**,
+**23 integration**, **642 security**; lint **336 файлов**, mypy **332 файла**,
+strict docs и `git diff --check` прошли. Пять существующих SWIG warnings сохранены.
+
+M9 подготовлен к ручному commit и PR в `main`: **53 файла** (7 modified,
+46 untracked), staging area пуста. Ветка `feat/m09-deterministic-mapper`;
+по локальным refs `HEAD = main = origin/main = d5f3abe`. Remote refs/CI будущего
+commit не проверялись. Актуальные команды, критерии и причины пропусков —
+в [checklist передачи](../plans/M09_deterministic_mapper.md#checklist-commit-pr).
+
+Проверки передачи: **274 M9/docs tests**, lint/typecheck **336/332**, strict docs,
+offline lock check и wheel/sdist verification — OK; evaluation JSON двух запусков
+побайтно равен. Все **65 test references** матрицы разрешаются; secrets, debug
+и случайных generated files в diff не обнаружено. Исправлен anchor документации;
+offline packaging повторён с обычным uv cache после нехватки hatchling во временном.
+Runtime-код на этапе передачи не менялся, полный pytest повторно не запускался.
+
+84 opt-in PostgreSQL tests не перезапускались: DB adapters не менялись.
+Production dependencies сохранены; commit/push/PR M9 в этой задаче не выполнялись.
+Записи M1–M8 ниже являются историей: ветки, локальные refs, показатели и формулировки
+«текущий diff» в них относятся к соответствующим этапам, а не к текущему M9.
+
 ## M8 — Normalized Data Profiler
 
 Реализован format-neutral async profiler после semantic parsing: incremental
