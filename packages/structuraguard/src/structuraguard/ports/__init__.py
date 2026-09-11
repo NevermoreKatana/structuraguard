@@ -3,7 +3,8 @@
 from structuraguard.ports.database import DatabaseAdapter
 from structuraguard.ports.llm import LLMProvider
 from structuraguard.ports.parser import Parser
-from structuraguard.ports.security import SecurityScanner
+from structuraguard.ports.profiling import NormalizedDataProfiler
+from structuraguard.ports.security import PIIClassifier, SecurityScanner
 from structuraguard.ports.semantic import (
     ParsePlanExecutor,
     ParsePlanValidator,
@@ -16,6 +17,8 @@ __all__ = (
     "AuditStore",
     "DatabaseAdapter",
     "LLMProvider",
+    "NormalizedDataProfiler",
+    "PIIClassifier",
     "ParsePlanExecutor",
     "ParsePlanValidator",
     "Parser",

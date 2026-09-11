@@ -39,6 +39,17 @@ _SDIST_ROOT = f"{_DISTRIBUTION_NAME}-{_VERSION}"
 
 _PACKAGE_FILES = frozenset(
     {
+        "structuraguard/contracts/profiling.py",
+        "structuraguard/domain/normalized_fingerprint.py",
+        "structuraguard/ports/profiling.py",
+        "structuraguard/profiling/__init__.py",
+        "structuraguard/profiling/_bounded.py",
+        "structuraguard/profiling/_context.py",
+        "structuraguard/profiling/_patterns.py",
+        "structuraguard/profiling/_statistics.py",
+        "structuraguard/profiling/_stream.py",
+        "structuraguard/profiling/pii.py",
+        "structuraguard/profiling/profiling.py",
         "structuraguard/__init__.py",
         "structuraguard/config.py",
         "structuraguard/contracts/__init__.py",
@@ -166,6 +177,16 @@ _PUBLIC_EXPORTS = frozenset(
 )
 _CONTRACT_EXPORTS = frozenset(
     {
+        "ExamplePolicy",
+        "LocalePolicy",
+        "NormalizedDataProfile",
+        "NormalizedFieldProfile",
+        "NormalizedProfileContext",
+        "NormalizedProfilingOptions",
+        "PIIClassificationRequest",
+        "PIIClassificationResult",
+        "ProfileLabel",
+        "SafeProfileSummary",
         "AuditEvent",
         "BatchFingerprint",
         "BooleanScalar",
@@ -358,6 +379,8 @@ _DOMAIN_EXPORTS = frozenset(
 )
 _PORT_EXPORTS = frozenset(
     {
+        "NormalizedDataProfiler",
+        "PIIClassifier",
         "AuditStore",
         "DatabaseAdapter",
         "LLMProvider",
