@@ -39,6 +39,19 @@ _SDIST_ROOT = f"{_DISTRIBUTION_NAME}-{_VERSION}"
 
 _PACKAGE_FILES = frozenset(
     {
+        "structuraguard/contracts/deterministic_mapping.py",
+        "structuraguard/contracts/semantic_catalog.py",
+        "structuraguard/ports/mapping.py",
+        "structuraguard/mapping/__init__.py",
+        "structuraguard/mapping/_aliases.py",
+        "structuraguard/mapping/_compatibility.py",
+        "structuraguard/mapping/_context.py",
+        "structuraguard/mapping/_inputs.py",
+        "structuraguard/mapping/_names.py",
+        "structuraguard/mapping/_ranking.py",
+        "structuraguard/mapping/_results.py",
+        "structuraguard/mapping/_scores.py",
+        "structuraguard/mapping/mapper.py",
         "structuraguard/contracts/profiling.py",
         "structuraguard/domain/normalized_fingerprint.py",
         "structuraguard/ports/profiling.py",
@@ -177,6 +190,17 @@ _PUBLIC_EXPORTS = frozenset(
 )
 _CONTRACT_EXPORTS = frozenset(
     {
+        "CandidateExplanation",
+        "CandidateSignal",
+        "DatabaseSemanticCatalog",
+        "DeterministicMappingOptions",
+        "DeterministicMappingResult",
+        "FieldCandidates",
+        "MappingSafeSummary",
+        "MappingScope",
+        "MappingWeights",
+        "SemanticColumn",
+        "SemanticTable",
         "ExamplePolicy",
         "LocalePolicy",
         "NormalizedDataProfile",
@@ -379,6 +403,7 @@ _DOMAIN_EXPORTS = frozenset(
 )
 _PORT_EXPORTS = frozenset(
     {
+        "CandidateMapper",
         "NormalizedDataProfiler",
         "PIIClassifier",
         "AuditStore",

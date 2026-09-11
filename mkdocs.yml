@@ -46,6 +46,7 @@ nav:
   - Публичный API: public-api.md
   - Database Inspector M7: database-inspection.md
   - Normalized Profiler M8: normalized-profiling.md
+  - Deterministic Mapper M9: deterministic-mapping.md
   - Структурный разбор M5: structure.md
   - LLM providers и routing M6: llm.md
   - LLM semantic parsing M6: llm-semantic-parsing.md
@@ -71,6 +72,7 @@ nav:
       - PostgreSQL inspection в пределах scope: adr/0016-scoped-postgresql-inspection.md
       - Canonical catalog и FK graph: adr/0017-canonical-catalog-and-dependency-graph.md
       - Bounded normalized profiling: adr/0018-bounded-normalized-profiling.md
+      - Deterministic mapping candidates: adr/0019-deterministic-mapping-candidates.md
   - Планы:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
@@ -87,3 +89,6 @@ nav:
       - M08 — Normalized Data Profiler: plans/M08_normalized_data_profiler.md
       - M08 — аудит приёмки: plans/M08_acceptance.md
       - M08 — security review: plans/M08_security_review.md
+      - M09 — Deterministic Mapper: plans/M09_deterministic_mapper.md
+      - M09 — приёмка: plans/M09_acceptance.md
+      - M09 — security review: plans/M09_security_review.md

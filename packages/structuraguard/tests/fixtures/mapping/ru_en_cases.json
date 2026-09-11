@@ -1,0 +1,553 @@
+[
+  {
+    "case_id": "cal_en_normalized",
+    "split": "calibration",
+    "language": "en",
+    "group": "names",
+    "source_name": "Customer Name",
+    "value": "Acme",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "customers",
+        "column_name": "customer_name",
+        "kind": "text",
+        "aliases": [
+          "Customer Name"
+        ]
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "crm.customers.customer_name",
+    "entity_type": "customers"
+  },
+  {
+    "case_id": "cal_en_compact",
+    "split": "calibration",
+    "language": "en",
+    "group": "names",
+    "source_name": "CUSTOMERNAME",
+    "value": "Acme",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "customers",
+        "column_name": "customer_name",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "crm.customers.customer_name"
+  },
+  {
+    "case_id": "cal_en_tax",
+    "split": "calibration",
+    "language": "en",
+    "group": "aliases",
+    "source_name": "Tax ID",
+    "value": "7707083893",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "customers",
+        "column_name": "inn",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "crm.customers.inn"
+  },
+  {
+    "case_id": "cal_en_email",
+    "split": "calibration",
+    "language": "en",
+    "group": "patterns",
+    "source_name": "email",
+    "value": "person@example.org",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "customers",
+        "column_name": "email",
+        "kind": "text",
+        "aliases": [
+          "email"
+        ]
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "crm.customers.email",
+    "entity_type": "customers"
+  },
+  {
+    "case_id": "cal_ru_alias",
+    "split": "calibration",
+    "language": "ru",
+    "group": "aliases",
+    "source_name": "Контрагент",
+    "value": "ООО Альфа",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "customers",
+        "column_name": "legal_name",
+        "kind": "text",
+        "aliases": [
+          "Контрагент"
+        ]
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "crm.customers.legal_name"
+  },
+  {
+    "case_id": "cal_ru_amount",
+    "split": "calibration",
+    "language": "ru",
+    "group": "aliases",
+    "source_name": "Общая сумма",
+    "value": "125 000,50",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "customers",
+        "column_name": "total_amount",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "crm.customers.total_amount"
+  },
+  {
+    "case_id": "cal_ru_created",
+    "split": "calibration",
+    "language": "ru",
+    "group": "aliases",
+    "source_name": "Дата создания",
+    "value": "2026-09-01",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "customers",
+        "column_name": "created_at",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "crm.customers.created_at"
+  },
+  {
+    "case_id": "cal_ru_translit",
+    "split": "calibration",
+    "language": "ru",
+    "group": "transliteration",
+    "source_name": "Имя клиента",
+    "value": "Иван",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "customers",
+        "column_name": "imya_klienta",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "crm.customers.imya_klienta"
+  },
+  {
+    "case_id": "hold_en_camel",
+    "split": "holdout",
+    "language": "en",
+    "group": "names",
+    "source_name": "PartnerName",
+    "value": "Example",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "partners",
+        "column_name": "partner_name",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "archive.partners.partner_name"
+  },
+  {
+    "case_id": "hold_en_alias",
+    "split": "holdout",
+    "language": "en",
+    "group": "aliases",
+    "source_name": "Organization",
+    "value": "Example",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "partners",
+        "column_name": "display_name",
+        "kind": "text",
+        "aliases": [
+          "Organization"
+        ]
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "archive.partners.display_name"
+  },
+  {
+    "case_id": "hold_en_url",
+    "split": "holdout",
+    "language": "en",
+    "group": "patterns",
+    "source_name": "URL",
+    "value": "https://example.org",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "partners",
+        "column_name": "url",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "archive.partners.url"
+  },
+  {
+    "case_id": "hold_en_phone",
+    "split": "holdout",
+    "language": "en",
+    "group": "patterns",
+    "source_name": "Phone",
+    "value": "+7 (999) 123-45-67",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "partners",
+        "column_name": "phone",
+        "kind": "text",
+        "aliases": [
+          "Phone"
+        ]
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "archive.partners.phone",
+    "entity_type": "partners"
+  },
+  {
+    "case_id": "hold_ru_alias",
+    "split": "holdout",
+    "language": "ru",
+    "group": "aliases",
+    "source_name": "Покупатель",
+    "value": "ООО Бета",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "partners",
+        "column_name": "display_name",
+        "kind": "text",
+        "aliases": [
+          "Покупатель"
+        ]
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "archive.partners.display_name"
+  },
+  {
+    "case_id": "hold_ru_tax",
+    "split": "holdout",
+    "language": "ru",
+    "group": "aliases",
+    "source_name": "ИНН организации",
+    "value": "7707083893",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "partners",
+        "column_name": "inn",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "archive.partners.inn"
+  },
+  {
+    "case_id": "hold_ru_translit",
+    "split": "holdout",
+    "language": "ru",
+    "group": "transliteration",
+    "source_name": "Счёт",
+    "value": "A-12",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "partners",
+        "column_name": "schet",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "archive.partners.schet"
+  },
+  {
+    "case_id": "hold_ru_phone",
+    "split": "holdout",
+    "language": "ru",
+    "group": "patterns",
+    "source_name": "Телефон",
+    "value": "+7 (999) 123-45-67",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "partners",
+        "column_name": "phone",
+        "kind": "text",
+        "aliases": []
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "unrelated",
+        "column_name": "other",
+        "kind": "text"
+      }
+    ],
+    "expected": "archive.partners.phone"
+  },
+  {
+    "case_id": "calibration_en_generic",
+    "split": "calibration",
+    "language": "en",
+    "group": "generic",
+    "source_name": "name",
+    "value": "open",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "one",
+        "column_name": "name"
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "two",
+        "column_name": "name"
+      }
+    ],
+    "expected": null
+  },
+  {
+    "case_id": "calibration_en_wrong_type",
+    "split": "calibration",
+    "language": "en",
+    "group": "patterns",
+    "source_name": "email",
+    "value": "person@example.org",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "wrong",
+        "column_name": "email",
+        "kind": "integer"
+      }
+    ],
+    "expected": null
+  },
+  {
+    "case_id": "calibration_ru_generic",
+    "split": "calibration",
+    "language": "ru",
+    "group": "generic",
+    "source_name": "Статус",
+    "value": "open",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "one",
+        "column_name": "status"
+      },
+      {
+        "schema_name": "crm",
+        "table_name": "two",
+        "column_name": "status"
+      }
+    ],
+    "expected": null
+  },
+  {
+    "case_id": "calibration_ru_wrong_type",
+    "split": "calibration",
+    "language": "ru",
+    "group": "patterns",
+    "source_name": "Телефон",
+    "value": "+7 (999) 123-45-67",
+    "targets": [
+      {
+        "schema_name": "crm",
+        "table_name": "wrong",
+        "column_name": "phone",
+        "kind": "integer"
+      }
+    ],
+    "expected": null
+  },
+  {
+    "case_id": "holdout_en_generic",
+    "split": "holdout",
+    "language": "en",
+    "group": "generic",
+    "source_name": "name",
+    "value": "open",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "one",
+        "column_name": "name"
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "two",
+        "column_name": "name"
+      }
+    ],
+    "expected": null
+  },
+  {
+    "case_id": "holdout_en_wrong_type",
+    "split": "holdout",
+    "language": "en",
+    "group": "patterns",
+    "source_name": "email",
+    "value": "person@example.org",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "wrong",
+        "column_name": "email",
+        "kind": "integer"
+      }
+    ],
+    "expected": null
+  },
+  {
+    "case_id": "holdout_ru_generic",
+    "split": "holdout",
+    "language": "ru",
+    "group": "generic",
+    "source_name": "Статус",
+    "value": "open",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "one",
+        "column_name": "status"
+      },
+      {
+        "schema_name": "archive",
+        "table_name": "two",
+        "column_name": "status"
+      }
+    ],
+    "expected": null
+  },
+  {
+    "case_id": "holdout_ru_wrong_type",
+    "split": "holdout",
+    "language": "ru",
+    "group": "patterns",
+    "source_name": "Телефон",
+    "value": "+7 (999) 123-45-67",
+    "targets": [
+      {
+        "schema_name": "archive",
+        "table_name": "wrong",
+        "column_name": "phone",
+        "kind": "integer"
+      }
+    ],
+    "expected": null
+  }
+]
