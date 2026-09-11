@@ -45,6 +45,7 @@ nav:
   - Архитектура: architecture.md
   - Публичный API: public-api.md
   - Database Inspector M7: database-inspection.md
+  - Normalized Profiler M8: normalized-profiling.md
   - Структурный разбор M5: structure.md
   - LLM providers и routing M6: llm.md
   - LLM semantic parsing M6: llm-semantic-parsing.md
@@ -69,6 +70,7 @@ nav:
       - Ограниченный SQLite inspection: adr/0015-bounded-sqlite-inspection.md
       - PostgreSQL inspection в пределах scope: adr/0016-scoped-postgresql-inspection.md
       - Canonical catalog и FK graph: adr/0017-canonical-catalog-and-dependency-graph.md
+      - Bounded normalized profiling: adr/0018-bounded-normalized-profiling.md
   - Планы:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
@@ -82,3 +84,6 @@ nav:
       - M05 — security review: plans/M05_security_review.md
       - M06 — LLM semantic parsing: plans/M06_llm_semantic_parsing.md
       - M07 — Database Inspector: plans/M07_database_inspector.md
+      - M08 — Normalized Data Profiler: plans/M08_normalized_data_profiler.md
+      - M08 — аудит приёмки: plans/M08_acceptance.md
+      - M08 — security review: plans/M08_security_review.md

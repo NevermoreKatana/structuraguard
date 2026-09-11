@@ -3,11 +3,12 @@
 LLM M6-A/B: [FakeLLMProvider, NoLLMProvider, OpenAICompatibleProvider и routing](llm.md).
 M6-C/D: [LLMStructureAnalyzer](llm-semantic-parsing.md) и
 [SemanticParsingSession с offline-примером](semantic-parsing.md).
+M8: [NormalizedDataProfiler, безопасная сводка и ограничения](normalized-profiling.md).
 Общая SDK facade пока не реализует LLM orchestration.
 
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
-текущей реализации M4, M5-A/B/C и bounded M6-A/B/C/D. Facade-операции pipeline в эту
-поставку не входят.
+текущей реализации M4, M5-A/B/C, bounded M6-A/B/C/D, M7 и M8 в описанном ниже
+scope. Facade-операции pipeline в эту поставку не входят.
 
 Начните с [копируемого примера CSV → NormalizedBatch](structure.md).
 Канонические требования M5: [FR-014][spec-fr-014] и [раздел M5][spec-m5].
@@ -1474,3 +1475,40 @@ DTO сам не пересчитывает заявленный hash. Graph DTO:
 
 [spec-database]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#9-анализ-целевой-базы-данных
 [spec-m7]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m7-database-inspector
+
+
+## Normalized Data Profiler M8
+
+`structuraguard.profiling.NormalizedDataProfiler` строит bounded профиль после
+semantic parsing. Async `profile(NormalizedBatch | AsyncIterable[NormalizedBatch],
+*, context=None)` возвращает `NormalizedDataProfile` только после terminal/EOF
+и cleanup. DTO/options доступны через `structuraguard.contracts`, profiler port
+и `PIIClassifier` — через `structuraguard.ports`. Старые normalized DTO и manifest
+fingerprints не меняются.
+
+`structuraguard.profiling.LocalPIIClassifier` — локальная эвристика по bounded
+aggregates и labels, без raw examples, сети или LLM. Caller передаёт минимальный
+класс источника через `NormalizedProfileContext`; default — INTERNAL. Profiler
+не понижает этот минимум и проверяет binding результата PII adapter.
+
+`NormalizedDataProfile.field(entity_type, field_name)` возвращает статистику
+конкретного поля либо поднимает `KeyError("semantic_field_not_found")`.
+`safe_summary()` возвращает отдельный `SafeProfileSummary` со счётчиками и
+классом данных. Полный профиль чувствителен даже с masked/omitted samples:
+его JSON может содержать PII в extrema и labels. Ни classification, ни
+fingerprint профиля не дают разрешения на внешнюю отправку или импорт.
+
+`NormalizedProfilingOptions` задаёт locale, samples, inference thresholds и
+жёсткие лимиты; неверная конфигурация даёт `ValueError`. Во время обработки
+отказы имеют тип `structuraguard.exceptions.NormalizedProfilingError` с кодами
+`NORMALIZED_PROFILE_*` и безопасным `details["reason"]`; отмена сохраняет
+`asyncio.CancelledError`. Обрабатывается полный конечный поток; превышение
+лимита не возвращает частичный профиль. Источником и provider владеет caller,
+profiler закрывает полученный iterator. Общая SDK facade, DB mapping и загрузка
+данных в M8 не добавлены.
+
+[Пример, locale policy, безопасные summaries и fingerprint contract](normalized-profiling.md).
+Канонические требования: [FR-013][spec-fr-013] и [M8][spec-m8].
+
+[spec-fr-013]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-013-профилирование-нормализованных-данных
+[spec-m8]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m8-normalized-data-profiler

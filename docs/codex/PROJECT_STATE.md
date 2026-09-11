@@ -2,13 +2,86 @@
 
 Обновлено: 2026-09-11.
 
+## M8 — Normalized Data Profiler
+
+Реализован format-neutral async profiler после semantic parsing: incremental
+statistics, bounded occurrence samples и KMV, explicit RU/EN locale policy,
+ranked/ambiguous types, identity/PII evidence, safe summaries и отдельный
+`normalized_content_v1` fingerprint. Результат доступен только после terminal,
+EOF и cleanup; старые normalized DTO и manifest fingerprints не меняются.
+
+[API и ограничения](../normalized-profiling.md),
+[план, review и актуальные проверки](../plans/M08_normalized_data_profiler.md),
+[матрица приёмки M8](../plans/M08_acceptance.md),
+[security review M8](../plans/M08_security_review.md),
+[ADR 0018](../adr/0018-bounded-normalized-profiling.md).
+Аудит добавил 97 cases и исправил пропуск PII в отдельных context labels.
+Security review добавил ещё 15 cases и исправил 4 Medium на границах
+regex, Decimal thresholds, UTC conversion и schema_version validation.
+Проверки этапа security review на Python 3.12.9: **209 M8**, **2699 total**, **22 integration**,
+**595 security**; lint/typecheck/strict docs и offline wheel/sdist verification
+прошли. PostgreSQL suite не перезапускался: DB adapters не менялись.
+Реализация M8 локальная; commit/push/PR в этой задаче не выполнялись.
+
+M8 подготовлен к ручному commit и PR в `main`: **43 commit-кандидата**
+(10 modified, 33 new), staging area пустая. Активная ветка
+`feat/m08-normalized-data-profiler`; `HEAD = main = origin/main = 2d813c4`
+по локальным refs. На шаге передачи повторно прошли **338 tests** (M8 и docs),
+lint/typecheck, offline lock check и strict docs; матрица содержит
+**86 проверенных test references**. Secrets/debug/generated artifacts не обнаружены.
+Актуальный [checklist, команды и причины пропусков](../plans/M08_normalized_data_profiler.md#checklist-commit-pr).
+Удалённые refs и CI точного M8 commit ещё не проверялись; публикация выполняется вручную.
+
+После финального review исправлены ещё четыре Medium: неверные timezone offsets,
+malformed email domains, необработанные ошибки forged manifest и превышение
+serialized output cap. Добавлены **17 regression cases** (до исправления
+**11 failed, 6 passed**); после исправления **17 passed**, узкий M8 suite —
+**227 passed**, lint/typecheck — **296/293 files**, strict docs прошёл.
+Публичный API, content fingerprint projection и dependencies сохранены.
+Повторный review локального diff существенных findings не выявил.
+Полные gates исправления: **2717 tests**, **22 integration**, **599 security**,
+offline wheel/sdist verification — OK. Исключены **84 PostgreSQL cases**;
+другие Python/OS и remote CI не запускались.
+Benchmark после исправлений: 10000/50000 записей — **3.422/17.938 s**, рост **5.24×**;
+default deadline и плановый порог роста соблюдены.
+[Матрица исправлений и проверки](../plans/M08_normalized_data_profiler.md#m08-final-review-fix).
+
+Документация M8 сверена с реализацией и тестами: русские публичные docstring
+описывают параметры, результат, исключения, владение iterator и PII semantics.
+Копируемый пример принимает класс источника явно и возвращает `safe_summary()`.
+Описаны schema-only пустые поля, locale ambiguity, неполный PII scan,
+ресурсные пределы и три fingerprints; добавлены ссылки на канонические разделы ТЗ.
+Новый ADR не нужен: долгоживущее решение уже принято в ADR 0018.
+Production DLP/redaction, DB mapping, scoring, loader и общая SDK facade
+не объявлены готовыми в M8.
+
+Проверки этого шага документации на Python 3.12.9:
+
+- `uv run --locked --no-sync pytest packages/structuraguard/tests/docs/test_m08_examples.py -q`
+  — **2 passed**: офлайн-пример с INTERNAL и RESTRICTED, без понижения класса
+  и утечки примеров/имён в safe summary.
+- `uv run --locked --no-sync pytest packages/structuraguard/tests/docs packages/structuraguard/tests/unit/profiling packages/structuraguard/tests/contract/profiling packages/structuraguard/tests/property/profiling packages/structuraguard/tests/security/profiling packages/structuraguard/tests/integration/test_normalized_profiling.py -q`
+  — **321 passed**: все документационные примеры и M8 unit/contract/property/security/integration.
+- `make lint typecheck` — **294 files**, **291 source files**, без ошибок.
+- `make docs` — strict build с проверкой внутренних ссылок и anchors; успешно.
+- Все 6 канонических ссылок M8 сверены с заголовками локального ТЗ.
+  В 7 затронутых production-модулях AST без docstring не изменился;
+  `git diff --check` прошёл.
+
+Полный suite и PostgreSQL suite на шаге документации не повторялись:
+исполняемый код не изменён, результаты предыдущих полных gates приведены выше.
+Реальные LLM API не вызывались; доступность внешних URLs не проверялась по сети.
+
+## История последнего исправления M7
+
 После commit M7 `1027781` исправлено падение cancellation tests в присланном
 CI Python 3.14.2: отменённый `asyncio.shield()` сообщал позднюю ошибку worker
 в event loop. Исправлены ожидание worker и связанный PostgreSQL cleanup path;
 добавлены 5 security regression cases. Публичный API и dependencies сохранены.
-Изменения этого исправления остаются uncommitted; commit/push/PR не выполнялись.
+Исправление уже вошло в commit `c125d6b` и merged PR #8 (`2d813c4`);
+текущий uncommitted diff относится к M8. Проверки ниже сохранены как история M7.
 
-Последний полный прогон: по **2474 tests** на Python 3.12.9 и 3.14.2;
+Полный прогон исправления M7: по **2474 tests** на Python 3.12.9 и 3.14.2;
 на Python 3.14.2 — **18 integration**, **487 security**, **84 PostgreSQL tests**
 на реальных Testcontainers 16.15/18.6. Lint и mypy прошли; offline wheel/sdist
 verification прошла на штатной Python 3.12.9. Дополнительный installed-package
@@ -31,17 +104,17 @@ literal — regression canary. Повторный review существенны�
 ## Текущая версия и milestone
 
 - Версия package: `0.3.0`.
-- Текущий milestone: `M7 — Database Inspector`; реализованы SQLite adapter и
+- Текущий milestone: `M8 — Normalized Data Profiler`; реализация описана выше.
+- `M7 — Database Inspector`: реализованы SQLite adapter и
   normalization A, PostgreSQL reflection B, canonical fingerprint/FK graph C.
   Подтверждённый scope: [API и примеры](../database-inspection.md),
   [план](../plans/M07_database_inspector.md), [матрица приёмки](../plans/M07_acceptance.md).
 - `M5 — Structural Profiler и deterministic ParsePlan`:
   A (`StructuralProfiler`), B (`DeterministicStructureAnalyzer`) и C
   (`ParsePlanValidator`/`ParsePlanExecutor`) реализованы в пределах закрытой policy.
-- Активная ветка: `feat/m07-database-inspector`, HEAD `1027781`
-  (`feat(database): реализовать безопасный Database Inspector M7`).
-  Follow-up fix Python 3.14 локальный, версия package не повышалась.
-  Commit/push/PR в шаге исправления не выполнялись.
+- Активная ветка: `feat/m08-normalized-data-profiler`, HEAD `2d813c4`.
+  Локальные `main`/`origin/main` совпадают с HEAD; M7 и fix Python 3.14
+  уже включены в базу. Версия package не повышалась; M8 остаётся uncommitted.
 - Исторические checklist, состав diff, команды и незакрытые пункты передачи M5:
   [подготовка M5](../plans/M05_parse_plan.md#checklist-commit-pr).
 - [Матрица приёмки M5](../plans/M05_acceptance.md) связывает критерии с tests
@@ -58,8 +131,11 @@ literal — regression canary. Повторный review существенны�
 Фактическая policy и ограничения: [план M5](../plans/M05_parse_plan.md),
 [план M6](../plans/M06_llm_semantic_parsing.md),
 [semantic parsing API с копируемым offline-примером](../semantic-parsing.md).
-Канонические требования текущего milestone: [§9 — анализ целевой БД][spec-database]
-и [M7 — Database Inspector][spec-m7]. Общая SDK facade и DB mapping не доступны.
+Канонические требования текущего milestone: [FR-013][spec-fr-013] и
+[M8 — Normalized Data Profiler][spec-m8]; ссылки на §11.4–11.6 и §12 собраны
+в [документации M8](../normalized-profiling.md).
+Для предыдущего M7: [§9 — анализ целевой БД][spec-database] и
+[M7 — Database Inspector][spec-m7]. Общая SDK facade и DB mapping не доступны.
 
 ## Состояние milestones
 
@@ -97,7 +173,9 @@ literal — regression canary. Повторный review существенны�
   Финальный review исправил ещё 2 Medium: потерю domain CHECK metadata и
   зависимость fingerprint от физических пропусков после DROP COLUMN.
   Ограничения и непроверенные угрозы: [review M7](../plans/M07_security_review.md).
-- `M8`–`M17` — не начаты.
+- `M8` — реализован bounded Normalized Data Profiler; данные, лимиты и
+  результаты проверок в [отчёте M8](../plans/M08_normalized_data_profiler.md).
+- `M9`–`M17` — не начаты.
 
 ## Подтверждённое поведение M7
 
@@ -719,6 +797,8 @@ M6 остаются за пределами M7. Исторический [checkl
 [spec-m6]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m6-llm-assisted-semantic-parsing
 [spec-database]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#9-анализ-целевой-базы-данных
 [spec-m7]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m7-database-inspector
+[spec-fr-013]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#fr-013-профилирование-нормализованных-данных
+[spec-m8]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m8-normalized-data-profiler
 
 ## Проверка документации M6 {#m06-docs-checks}
 

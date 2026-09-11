@@ -343,6 +343,17 @@ class ParseExecutionError(StructuraGuardError):
         )
 
 
+class NormalizedProfilingError(StructuraGuardError):
+    """Профилирование не завершено из-за данных, лимита, адаптера или cleanup.
+
+    Profiler использует error_code с префиксом NORMALIZED_PROFILE_ и суффиксом
+    INVALID_STREAM, UNSUPPORTED_SCHEMA, LIMIT_EXCEEDED, TIMEOUT,
+    CLASSIFICATION_FAILED либо CLEANUP_FAILED. details["reason"] содержит
+    безопасный машинный идентификатор причины без raw values/source errors.
+    Незавершённый профиль не возвращается; отмена остаётся CancelledError.
+    """
+
+
 class StructuralProfilingError(StructuraGuardError):
     """Недопустимый либо незавершённый поток structural profiling."""
 
