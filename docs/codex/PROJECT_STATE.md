@@ -2,9 +2,155 @@
 
 Обновлено: 2026-09-11.
 
+## M10 — LLM Semantic DB Mapper
+
+Текущий milestone реализован локально в scope semantic proposals:
+`LLMSemanticMapper.propose` использует M8 profile, M7 catalog, явный scope,
+deterministic top-k M9 и существующий M6 `PolicyAwareLLMRouter`. Новый provider
+protocol не добавлен. Для каждой связанной группы строится bounded masked payload;
+`SemanticMappingDecision` допускает только переданные table/column/relation IDs.
+Подтверждены одинаковые column names в разных tables, proposal split по покрытым
+FK-цепочкам и полные ordered composite relations. Неизвестный target, malformed
+response, неполный FK и collisions отклоняются без partial result.
+
+SDK агрегирует deterministic/LLM signals, ambiguity, validation и security
+penalties; `auto/confirm/reject` относятся к proposal. `NEEDS_REVIEW` сохраняет
+неоднозначность и blockers, а `COMPLETED` не разрешает импорт. Scanner проверяет
+точный payload, classification не понижается после masking/fallback. Raw response
+не сохраняется; `metadata_only` исключает decision, но оставляет sensitive локальные
+candidates. Полный result не предназначен для обычного log; есть `safe_summary()`.
+
+[API, копируемый пример и ограничения](../llm-database-mapping.md),
+[план](../plans/M10_llm_database_mapping.md),
+[матрица приёмки](../plans/M10_acceptance.md),
+[security review](../plans/M10_security_review.md),
+[ADR 0020](../adr/0020-llm-semantic-mapping-proposals.md).
+Канонические требования: [M10 в ТЗ](https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m10-llm-semantic-db-mapper);
+ссылки на Catalog, mapping, confidence и security собраны в API-документации.
+
+Security review исправил три Medium: утечку внешних scanner exceptions, дорогой
+regex до byte limit и потерю review из reason codes модели. Подтверждены
+**14 новых security cases**, **278 узких tests**, **3071 total**,
+**24 integration**, **719 security**; lint **356**, mypy **352**, strict docs
+и offline wheel/sdist verification — OK. Это результаты security-этапа до
+последующего обновления документации; команды и ограничения сохранены в отчёте.
+
+Не реализованы MappingPlan execution/DB writes, общий SDK orchestration, проверка
+живых grants/parent rows, generated-key propagation и production DLP scanner.
+Реальные платные LLM и production deployments не использовались; default tests
+работают с FakeLLMProvider, HTTP contract — с MockTransport. Confidence остаётся
+эвристикой без production benchmark. Новых production dependencies нет.
+
+### Документация M10 — проверка 2026-09-11
+
+Уточнены русские public docstrings всех новых contracts и entry points M10,
+параметры, исключения и side effects. Набор полей и публичные сигнатуры сохранены;
+описания wire DTO входят в JSON Schema и проверены обоими HTTP modes на
+MockTransport. Руководство содержит копируемую async функцию с явным whitelist,
+описание `metadata_only`, порогов, необратимого masking и границ proposal.
+Существующий ADR 0020 фиксирует долгоживущую архитектурную границу; нового решения
+для документации не потребовалось.
+
+Новый `tests/docs/test_m10_examples.py` исполняет именно блок из руководства
+с запретом сети, FakeLLMProvider и реальными синтетическими M7/M8 snapshots:
+обычный decision, metadata_only, no_llm и пустой whitelist. До добавления блока
+все четыре tests падали; после проверяют выбранный qualified target, review,
+provider/prompt metadata, отсутствие PII в payload и неизменность snapshots.
+Тестовый scanner не объявляется production DLP.
+
+Свежие проверки после обновления docstrings и примера:
+
+| Команда | Фактический результат |
+|---|---|
+| `uv run --locked --no-sync pytest packages/structuraguard/tests/docs/test_m10_examples.py -q` | **4 passed** |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs/test_m10_examples.py packages/structuraguard/tests/unit/contracts/test_m10_semantic_mapping.py packages/structuraguard/tests/unit/llm/test_semantic_mapping_contract.py packages/structuraguard/tests/unit/mapping/test_semantic_mapper.py` | **33 passed**, включая Fake/NoLLM и HTTP native/JSON object |
+| `uv run --locked --no-sync pytest packages/structuraguard/tests/docs -q` | **121 passed** |
+| `make lint` / `make typecheck` | Ruff **357 файлов**, mypy **353 файла**, OK |
+| `make test` | **3075 passed**, **84 deselected**, 5 существующих SWIG warnings |
+| `make test-integration` | **24 passed**, **3135 deselected**, 5 существующих SWIG warnings |
+| `make test-security` | **719 passed** |
+| `make docs` | Strict MkDocs build с проверкой внутренних ссылок/anchors — OK |
+| `make test-build` | Offline wheel/sdist rebuild/install — **distribution verification OK** |
+| Локальная проверка canonical links / `git diff --check` | **10 anchors** ТЗ существуют, whitespace — OK |
+
+Основные проверки использовали `UV_CACHE_DIR=/private/tmp/structuraguard-m10-uv`.
+Packaging повторён вне sandbox после сбоя macOS SystemConfiguration в uv, затем
+с `UV_CACHE_DIR=/Users/katana/.cache/uv`: во временном cache отсутствовал hatchling
+1.32.0 для isolated rebuild. Оба ограничения окружения устранены без сетевых
+загрузок и изменений dependencies/lock. PostgreSQL/live grants, real LLM
+deployments, production DLP и калибровка confidence этим этапом не подтверждаются.
+
+### Исправления финального review M10 — 2026-09-11 {#m10-review-fix-checks}
+
+Исправлены оба Medium findings в пределах утверждённого scope:
+
+- Абсолютный monotonic deadline проверяется после синхронных этапов подготовки,
+  перед scanner/передачей запроса router и перед возвратом proposal. Public
+  preparation выдаёт `MAPPING_LIMIT_EXCEEDED`, общий `propose` — `LLM_TIMEOUT`.
+  Истёкший deadline не превращается в успешный результат; mapper освобождается
+  после ошибки, а использованный бюджет router сохраняется.
+- `SemanticMappingResult` сохраняет `response_schema_id`,
+  `response_schema_version` и `response_schema_fingerprint` из существующего
+  M6 registry во всех retention modes. Это ожидаемая schema, включая no_llm и
+  пустые candidates. Поля добавлены для provenance; старые результаты читаются
+  без них и не получают текущий hash задним числом. Частичный набор отклоняется.
+  Публичные сигнатуры, M6–M9 contracts и provider abstraction не изменены.
+
+`tests/unit/mapping/test_m10_review_fixes.py` добавляет **17 cases**: последний
+синхронный этап preparation; expiry при подготовке, создании schema, scan,
+validation, aggregation и проверке результата; повторный вызов после timeout;
+оба retention modes с active/no_llm/empty scope; legacy round-trip и запрет
+неполной schema metadata. Используются реальные операции с контролируемым
+монотонным временем и FakeLLMProvider, без ожиданий и внешних API.
+До исправлений — **14 failed, 3 passed**; после — **17 passed**.
+
+Свежие проверки после исправлений:
+
+| Команда | Фактический результат |
+|---|---|
+| `uv run --locked --no-sync pytest packages/structuraguard/tests/unit/mapping/test_m10_review_fixes.py -q` | **17 passed** |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/unit/mapping packages/structuraguard/tests/unit/contracts/test_m10_semantic_mapping.py packages/structuraguard/tests/unit/llm/test_semantic_mapping_contract.py packages/structuraguard/tests/security/mapping packages/structuraguard/tests/property/mapping/test_semantic_properties.py packages/structuraguard/tests/integration/test_semantic_mapping.py packages/structuraguard/tests/docs/test_m10_examples.py packages/structuraguard/tests/smoke/test_mapping_boundaries.py` | **300 passed** |
+| `make lint` / `make typecheck` | Ruff **358 файлов**, mypy **354 файла**, OK |
+| `make test` | **3092 passed**, **84 deselected**, 5 существующих SWIG warnings |
+| `make test-integration` | **24 passed**, **3152 deselected**, 5 существующих SWIG warnings |
+| `make test-security` | **719 passed** |
+| `make test-build` | Offline wheel/sdist verification — OK |
+| `make docs` / `git diff --check` | Strict docs и whitespace — OK |
+
+Узкие проверки использовали временный uv cache, полный набор gates — существующий
+`/Users/katana/.cache/uv` вне sandbox для localhost/ps и offline rebuild.
+Повторный review новых изменений проверил deadline/error paths, cancellation,
+бюджет router, schema provenance, совместимость DTO, зависимости и отсутствие
+расширения полномочий LLM. Существенных нерешённых findings в этих правках нет.
+Deadline остаётся кооперативным: он проверяется между синхронными операциями,
+а не прерывает Python-код посередине. Непроверенные deployments/DLP/PostgreSQL
+и калибровка confidence остаются ограничениями, перечисленными выше.
+
+### Подготовка M10 к ручному commit и PR — 2026-09-11
+
+M10 локально принят в scope semantic mapping proposals. В
+[плане](../plans/M10_llm_database_mapping.md#m10-handoff)
+актуализированы статус, checklist восьми критериев, состав всех 35 файлов diff,
+фактические команды и причины пропущенных проверок. Commit и PR в `main`
+не создавались; ветка `feat/m10-llm-database-mapping`, HEAD `1b12f55`.
+
+На этом этапе изменена только документация: production и tests совпадают с
+полным прогоном выше. Дополнительно выполнены offline `make lock-check`
+(105 packages) и все docs examples (**121 passed**), сверены 37 test references
+матрицы по AST. Проверка tracked/untracked diff не обнаружила credential-pattern
+совпадений, production debug/unsafe calls и случайных generated/temp файлов;
+production dependencies и lock-файл не изменены. Offline lock check повторён
+вне sandbox после panic uv в macOS SystemConfiguration и успешно завершён.
+Финальные `make docs` (strict) и `git diff --check` прошли; пять неверных anchors
+в первоначальных handoff-ссылках исправлены, strict validation не ослаблялась.
+Checklist завершён до ручных commit/PR и удалённого CI.
+
+Ниже сохранена история предыдущих milestones; её численные результаты и сведения
+о ветках/commit не являются текущим состоянием M10.
+
 ## M9 — Deterministic DB Mapper
 
-Текущий milestone реализован локально: `CandidateMapper.rank` и
+Предыдущий milestone: `CandidateMapper.rank` и
 `DeterministicMapper` принимают готовые M8/M7 snapshots, явный `MappingScope`
 и optional Semantic Catalog. SDK вычисляет explainable scores, ограничивает
 список candidates, сохраняет ambiguity, lineage и детерминированный порядок.
@@ -184,7 +330,7 @@ literal — regression canary. Повторный review существенны�
 ## Текущая версия и milestone
 
 - Версия package: `0.3.0`.
-- Текущий milestone: `M8 — Normalized Data Profiler`; реализация описана выше.
+- Текущий milestone: `M10 — LLM Semantic DB Mapper`; подтверждённый scope описан выше.
 - `M7 — Database Inspector`: реализованы SQLite adapter и
   normalization A, PostgreSQL reflection B, canonical fingerprint/FK graph C.
   Подтверждённый scope: [API и примеры](../database-inspection.md),
@@ -192,9 +338,9 @@ literal — regression canary. Повторный review существенны�
 - `M5 — Structural Profiler и deterministic ParsePlan`:
   A (`StructuralProfiler`), B (`DeterministicStructureAnalyzer`) и C
   (`ParsePlanValidator`/`ParsePlanExecutor`) реализованы в пределах закрытой policy.
-- Активная ветка: `feat/m08-normalized-data-profiler`, HEAD `2d813c4`.
-  Локальные `main`/`origin/main` совпадают с HEAD; M7 и fix Python 3.14
-  уже включены в базу. Версия package не повышалась; M8 остаётся uncommitted.
+- Активная ветка на 2026-09-11: `feat/m10-llm-database-mapping`, HEAD `1b12f55`.
+  M10 находится в рабочем diff; commit/push/PR в этой задаче не выполнялись.
+  Версия package не повышалась.
 - Исторические checklist, состав diff, команды и незакрытые пункты передачи M5:
   [подготовка M5](../plans/M05_parse_plan.md#checklist-commit-pr).
 - [Матрица приёмки M5](../plans/M05_acceptance.md) связывает критерии с tests
@@ -211,11 +357,13 @@ literal — regression canary. Повторный review существенны�
 Фактическая policy и ограничения: [план M5](../plans/M05_parse_plan.md),
 [план M6](../plans/M06_llm_semantic_parsing.md),
 [semantic parsing API с копируемым offline-примером](../semantic-parsing.md).
-Канонические требования текущего milestone: [FR-013][spec-fr-013] и
+Требования M10 связаны с [его API-документацией](../llm-database-mapping.md).
+Для предыдущего M8: [FR-013][spec-fr-013] и
 [M8 — Normalized Data Profiler][spec-m8]; ссылки на §11.4–11.6 и §12 собраны
 в [документации M8](../normalized-profiling.md).
 Для предыдущего M7: [§9 — анализ целевой БД][spec-database] и
-[M7 — Database Inspector][spec-m7]. Общая SDK facade и DB mapping не доступны.
+[M7 — Database Inspector][spec-m7]. DB mapping доступен отдельными M9/M10 API;
+общая SDK facade и выполнение MappingPlan не объявлены готовыми.
 
 ## Состояние milestones
 
@@ -255,7 +403,10 @@ literal — regression canary. Повторный review существенны�
   Ограничения и непроверенные угрозы: [review M7](../plans/M07_security_review.md).
 - `M8` — реализован bounded Normalized Data Profiler; данные, лимиты и
   результаты проверок в [отчёте M8](../plans/M08_normalized_data_profiler.md).
-- `M9`–`M17` — не начаты.
+- `M9` — реализован Deterministic DB Mapper в [документированном scope](../deterministic-mapping.md).
+- `M10` — реализованы semantic proposals и policy/confidence layer;
+  ограничения и подтверждение поведения перечислены выше.
+- `M11`–`M17` — не объявлены реализованными в текущем milestone.
 
 ## Подтверждённое поведение M7
 
