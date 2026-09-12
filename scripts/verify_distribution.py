@@ -39,6 +39,13 @@ _SDIST_ROOT = f"{_DISTRIBUTION_NAME}-{_VERSION}"
 
 _PACKAGE_FILES = frozenset(
     {
+        "structuraguard/contracts/semantic_mapping.py",
+        "structuraguard/llm/_content.py",
+        "structuraguard/mapping/_semantic_candidates.py",
+        "structuraguard/mapping/_semantic_confidence.py",
+        "structuraguard/mapping/_semantic_prompt.py",
+        "structuraguard/mapping/_semantic_validation.py",
+        "structuraguard/mapping/semantic.py",
         "structuraguard/contracts/deterministic_mapping.py",
         "structuraguard/contracts/semantic_catalog.py",
         "structuraguard/ports/mapping.py",
@@ -190,6 +197,23 @@ _PUBLIC_EXPORTS = frozenset(
 )
 _CONTRACT_EXPORTS = frozenset(
     {
+        "SemanticAssessment",
+        "SemanticCandidateScore",
+        "SemanticChoice",
+        "SemanticColumnCandidate",
+        "SemanticFieldCandidates",
+        "SemanticGroupResult",
+        "SemanticMappingCandidateSet",
+        "SemanticMappingContext",
+        "SemanticMappingDecision",
+        "SemanticMappingOptions",
+        "SemanticMappingPreparation",
+        "SemanticMappingResult",
+        "SemanticRelationCandidate",
+        "SemanticRelationPair",
+        "SemanticScoredChoice",
+        "SemanticTableCandidate",
+        "SemanticTableChoice",
         "CandidateExplanation",
         "CandidateSignal",
         "DatabaseSemanticCatalog",
