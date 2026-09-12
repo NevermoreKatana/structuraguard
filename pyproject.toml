@@ -24,6 +24,7 @@ dev = [
     "PyYAML>=6.0.3,<7",
     "types-defusedxml>=0.7,<1",
     "types-PyYAML>=6,<7",
+    "types-jsonschema>=4.26,<5",
     "anyio>=4.11,<5",
     "hatchling>=1.28,<2",
     "hypothesis>=6.100,<7",

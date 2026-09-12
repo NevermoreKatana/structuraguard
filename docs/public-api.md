@@ -7,12 +7,25 @@ M8: [NormalizedDataProfiler, безопасная сводка и огранич
 M9: [DeterministicMapper](deterministic-mapping.md).
 M10: [LLMSemanticMapper и границы proposal](llm-database-mapping.md).
 M11: [MappingPlanValidator, полный отчёт и policy](mapping-plan-validation.md).
+M12: [NormalizerRegistry](normalization.md), [JsonSchemaValidator](json-schema-validation.md),
+[DB constraints и business rules](db-business-validation.md),
+[ProvenanceValidator и ValidationReportBuilder](provenance-validation.md).
 Общая SDK facade пока не реализует LLM orchestration.
 
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
-текущей реализации M4, M5-A/B/C, bounded M6-A/B/C/D, M7, M8, M9, M10 и M11 в
+текущей реализации M4, M5-A/B/C, bounded M6-A/B/C/D, M7, M8, M9, M10, M11 и standalone M12 A–D в
 scope соответствующих руководств. Facade-операции pipeline и DB loader
 в эту поставку не входят; M11 вызывается как отдельный сервис проверки.
+
+M12 пока не предоставляет общего coordinator: caller готовит projection для JSON
+Schema/DB/rules, выбирает trusted policy и связывает layer results с provenance.
+Scalar normalizers синхронны; остальные validators вызываются через async API.
+`accepted` отдельного сервиса подтверждает только его scope. Report builder требует
+явно указать обязательные уровни; ни один из этих результатов не разрешает загрузку.
+Derived `NormalizedBatch` schema 1.3, автоматическая перепривязка MappingPlan/catalog
+и dependency outcomes по каждой проверке остаются вне реализации.
+Текущие границы сверены в [аудите M12](plans/M12_acceptance_audit.md);
+целевой состав — в [каноническом разделе M12 ТЗ](https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m12-validation-engine).
 
 Начните с [копируемого примера CSV → NormalizedBatch](structure.md).
 Канонические требования M5: [FR-014][spec-fr-014] и [раздел M5][spec-m5].

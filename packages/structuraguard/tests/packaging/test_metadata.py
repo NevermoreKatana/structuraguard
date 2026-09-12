@@ -83,19 +83,23 @@ def test_package_metadata_declares_one_typed_python_312_distribution() -> None:
     assert (SOURCE_PACKAGE / "py.typed").is_file()
 
 
-def test_base_dependencies_are_exactly_pydantic_and_charset_normalizer() -> None:
+def test_base_dependencies_have_exact_names_and_supported_version_bounds() -> None:
     project = _load_package_project()
     dependencies = _as_string_sequence(project.get("dependencies"), "dependencies")
 
     assert tuple(map(_requirement_name, dependencies)) == (
         "pydantic",
         "charset-normalizer",
+        "jsonschema",
+        "referencing",
     )
     requirements = {_requirement_name(item): item for item in dependencies}
     assert re.search(r">=\s*2(?:\D|$)", requirements["pydantic"])
     assert re.search(r"<\s*3(?:\D|$)", requirements["pydantic"])
     assert re.search(r">=\s*3\.4(?:\D|$)", requirements["charset-normalizer"])
     assert re.search(r"<\s*4(?:\D|$)", requirements["charset-normalizer"])
+    assert requirements["jsonschema"] == "jsonschema>=4.26,<5"
+    assert requirements["referencing"] == "referencing>=0.37,<0.38"
 
 
 def test_optional_extras_are_exact_and_all_is_the_deduplicated_union() -> None:

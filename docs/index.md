@@ -4,6 +4,17 @@ StructuraGuard — встраиваемая Python-библиотека для �
 разнородных данных в существующие реляционные БД. Основной API асинхронный, а
 sync API предоставляется отдельной facade.
 
+## Нормализация и проверки M12
+
+Доступны отдельные сервисы: [conservative scalar normalization](normalization.md),
+[локальный JSON Schema validator](json-schema-validation.md),
+[DB constraints и business rules](db-business-validation.md),
+[provenance validation и итоговый отчёт](provenance-validation.md).
+В руководствах есть копируемые примеры и ограничения каждого API.
+Общий M12 остаётся частичным: автоматический coordinator и projection между
+сервисами ещё не реализованы. Подтверждённый scope — в
+[обзоре публичного API](public-api.md) и [состоянии проекта](codex/PROJECT_STATE.md).
+
 ## Доступность в M6
 
 M6 добавляет provider-neutral semantic parsing поверх M4 extraction и M5

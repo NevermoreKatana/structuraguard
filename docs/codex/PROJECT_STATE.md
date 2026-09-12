@@ -1,6 +1,194 @@
 # Состояние проекта StructuraGuard
 
-Обновлено: 2026-09-12.
+Обновлено: 2026-09-13.
+
+## M12 — исправление import probe на Python 3.13/3.14
+
+Воспроизведено падение CI на Python 3.13.11 и 3.14.2: attribution probe запрещал
+первый import `urllib.parse`, необходимый profiling через provenance validator.
+Python 3.12 скрывал зависимость, заранее импортируя этот модуль через `pathlib`.
+В подготовке attribution явно прогревается только `urllib.parse`; guards,
+black-box import и production-код не изменены.
+
+Добавлены три regression/control cases: cold `urllib` в обоих режимах и запрет
+прямого чтения SDK файла прогретой stdlib. Cold attribution падает до исправления
+также на 3.12. После исправления smoke suite проходит на Python 3.12.9, 3.13.11
+и 3.14.2: по 5 passed. Ruff (456 файлов) и mypy (452 файла) — OK.
+Полный основной suite: по 3814 passed на каждой из трёх версий, 116 PostgreSQL
+cases deselected. Offline wheel/sdist verification на 3.12 прошла, включая оба
+режима import probe установленного пакета. Linux CI после правки здесь не запускался.
+Причина, команды и границы проверки — в
+[плане M12](../plans/M12_validation_engine.md#m12-import-python-matrix).
+
+## M12 — подготовка к ручному commit и PR
+
+Самостоятельные сервисы A–D готовы к отдельному PR в `main`; полный M12 остаётся
+частичным. В плане закрыты AC-01/02/04/05; AC-03/06/07/08/09 оставлены открытыми
+с указанием отсутствующих coordinator/projection, revalidation, stream integration
+и schema 1.3/consumers. Новых существенных findings нет.
+
+Проверен состав 103 изменённых файлов; build outputs ignored, staged files нет.
+Commit и PR не создавались. В этом шаге изменены только план и этот state;
+результаты runtime gates после последних исправлений кода сохранены ниже.
+Checklist, фактические команды и причины непроверенных сценариев — в
+[плане M12](../plans/M12_validation_engine.md#m12-commit-readiness).
+
+## M12 — исправления финального review
+
+Закрыты все три Medium: ложный pass для PostgreSQL temporal precision, выполнение
+hooks forged DTO keys/storage и поздний `pydantic.ValidationError` для неверного
+`generated_at`. Исправления ограничены пятью production modules; сигнатуры API
+и утверждённый standalone scope сохранены. Temporal precision пока получает
+`DB_CONSTRAINT_UNVERIFIED` до DB I/O, без округления исходного значения.
+
+Добавлен 21 regression/control case: 17 unit/security и 4 на PostgreSQL 16/18.
+До исправлений 18 cases падали; после исправлений все проходят. Узкий M12 suite —
+409 passed, lint (456 файлов) и strict mypy (452 файла) — OK. Повторный review
+локального diff не выявил новых существенных findings.
+Полные gates после исправлений: 3811 main, 30 integration, 935 security и 116
+PostgreSQL — passed; offline wheel/sdist verification и strict docs build — OK.
+Подробности и соответствие findings тестам — в
+[security report](../plans/M12_security_review.md#m12-final-review-fixes).
+
+## M12 — документация подтверждённого поведения
+
+Обновлены [normalization](../normalization.md), [JSON Schema](../json-schema-validation.md),
+[DB/business rules](../db-business-validation.md), [provenance/report](../provenance-validation.md)
+и [обзор API](../public-api.md). Руководства ссылаются на канонические разделы ТЗ;
+публичные docstring описывают параметры, результаты, исключения и границы I/O.
+Существующие ADR 0022–0025 сохраняют принятые решения; новых архитектурных решений нет.
+
+Проверяются семь копируемых примеров M12: built-ins, configurable custom normalizer,
+JSON Schema, DSL, read-only SQLite precheck, physical replay и блокировка отчёта
+без обязательного DB layer. Добавлены четыре проверки примеров; существующие
+assertions сохранены. Сеть в примерах M12 запрещена audit hook; платные LLM не используются.
+
+Проверки документации: `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs`
+— 137 passed; узкие M12 examples — 7 passed. `make lint` — 454 файла, OK;
+`make typecheck` — 450 файлов, OK; `make docs` — strict build и внутренние ссылки OK.
+Сравнение AST 177 production modules подтвердило отсутствие изменений поведения:
+в Python API изменены только docstring. Полные runtime/security/DB gates предыдущего
+security review приведены ниже; в этом шаге они повторно не запускались.
+
+Scope остаётся standalone A–D. Автоматические coordinator/projection, derived schema
+1.3, перепривязка MappingPlan/catalog и per-check dependency outcomes не поставлены.
+`accepted` отдельного сервиса не подтверждает остальные уровни и не разрешает загрузку.
+Полные reports чувствительны; обычные logs используют `safe_summary()` итогового отчёта.
+
+## M12 — security review текущего diff
+
+[Security report](../plans/M12_security_review.md) фиксирует три закрытых Medium:
+небезопасная identity-проверка Python input с вызовом hooks, truthiness fallback
+в DSL limits и рост очереди intake до проверки общего node budget. Исправления
+ограничены normalization и validation boundaries; DB/parser logic не менялась.
+Добавлено 11 security regressions, каждый exploit воспроизведён до исправления.
+Финальный узкий suite — 388 passed; lint (452 файла) и strict mypy (448 файлов) — OK.
+Финальные gates: 3790 main, 30 integration, 922 security, 112 PostgreSQL — passed;
+docs, lock и offline packaging — OK. Critical/High не обнаружены; открытых Medium
+после fixes нет. Полные результаты и residual risks находятся в отчёте.
+
+## M12 — аудит общего плана
+
+[Матрица критерий → тест](../plans/M12_acceptance_audit.md) сопоставляет девять
+критериев и все 16 DSL-операций с наблюдаемыми tests. Добавлено 78 отсутствовавших
+cases в шести файлах. Воспроизведён и исправлен отказ построения rejected report
+на повторном claimed `value_id`; непроверенные дубликаты диагностируются по
+раздельным artifact pointers, verified duplicates по-прежнему запрещены.
+
+Свежие gates: 3779 main, 30 integration, 911 security, 112 PostgreSQL — passed;
+узкий M12 suite — 377 passed; lint (450 файлов), strict mypy (446 файлов), docs,
+lock и offline packaging — OK. Существующие tests и quality controls не ослаблены.
+
+Общий M12 остаётся частичным: automatic projection/coordinator, derived schema 1.3,
+перепривязка MappingPlan/catalog и per-check dependency outcomes ещё не реализованы.
+Проверены standalone A–D и trusted report composition. Аудит не объявляет их
+эквивалентными сквозному engine из общего плана.
+
+## M12-D — provenance и итоговый ValidationReport
+
+Реализованы async `ProvenanceValidator`, `DetailedValidationReport` и
+`ValidationReportBuilder`. Physical replay повторно использует M5 executor;
+проверяет source ID/fingerprint, refs, raw origins, locations/spans, selection
+и normalization trace по trusted policy/registry. Report содержит immutable
+references, deterministic findings, valid/invalid/unresolved/warnings и coverage.
+Safe summary исключает restricted values, locations, IDs, hashes и произвольные codes.
+Legacy DTO не меняются. Required/completed layers явные; missing evidence блокирует pass.
+
+[API](../provenance-validation.md), [ADR 0025](../adr/0025-provenance-replay-and-validation-report.md),
+[приёмка](../plans/M12_D_provenance_acceptance.md). Автоматическая projection и
+перепривязка MappingPlan/catalog после normalization остаются отдельной интеграцией.
+Gates при поставке D: 3701 main, 30 integration, 892 security, 112 PostgreSQL — passed;
+lint (444 файла), strict mypy (440 файлов), docs, lock и offline packaging — OK.
+Открытых существенных review findings в поставленном scope нет.
+
+## M12-C — DB constraints и business-rule DSL
+
+Реализованы standalone async `BusinessRuleValidator`, `DatabaseConstraintValidator`
+и SQLite/PostgreSQL `DatabaseConstraintReader`. Immutable completed dataset,
+16 allowlisted операций, typed operands, явные missing/null, точные Decimal sums,
+verified CHECK bindings, ordered UNIQUE/FK и upsert prechecks без repairs.
+Все независимые issues собираются; bounded limits fail closed. Catalog и keys
+проверяются в одной read-only transaction, PostgreSQL schema locks предшествуют
+snapshot; RLS и unknown semantics не получают ложный pass. Reader/writer права
+разделены; user SQL и dynamic execution отсутствуют. Новых dependencies нет.
+
+[API](../db-business-validation.md), [ADR 0024](../adr/0024-deterministic-record-constraints.md),
+[матрица приёмки и review](../plans/M12_C_constraints_acceptance.md).
+Physical provenance и итоговая агрегация поставлены в M12-D; автоматическая
+projection и сквозной ingest coordinator остаются отдельной интеграцией.
+
+Финальные gates после исправлений: **3640 основных**, **27 integration**,
+**877 security**, **112 PostgreSQL** tests — passed; lint (**433 файла**),
+mypy (**429 файлов**), strict docs, lock и offline packaging — OK.
+Существенных открытых findings в поставленном scope нет.
+
+## M12-B — локальная JSON Schema validation
+
+Реализован отдельный async `JsonSchemaValidator`: meta-validation Draft 2020-12,
+approved локальные URNs/fragments без retrieval, guarded recursive schemas,
+bounded schema/instance intake, regex profile, evaluation/issue budgets и LRU
+с finite entries/bytes. Input не меняется; defaults/format — annotations.
+Decimal comparisons и `multipleOf` точны. Отчёт содержит все применимые независимые
+issues с JSON paths/codes; превышение бюджета не выдаёт partial result.
+
+`jsonschema`/`referencing` стали прямыми runtime dependencies; versions/hashes
+зафиксированы lock. Implicit network, dynamic imports по данным и global cache нет.
+Dynamic refs/nested IDs/custom vocabularies/произвольные regex явно unsupported.
+Physical provenance и итоговая агрегация поставлены в M12-D; автоматическая
+projection и ingest coordinator остаются интеграционным продолжением;
+DB/business constraints реализованы standalone в M12-C (выше). Legacy DTO и MappingPlan не менялись.
+
+[API](../json-schema-validation.md), [приёмка и security review](../plans/M12_B_schema_acceptance.md),
+[ADR 0023](../adr/0023-local-json-schema-validation.md).
+
+Финальные проверки: **78 checks нового модуля**, **3500 основных**, **26 integration**,
+**846 security**, **104 PostgreSQL** tests — passed. Ruff **412 файлов**, mypy
+**408 файлов**, lock-check, strict docs и offline distribution verification — OK.
+Исправления security work budget и packaging metadata подтверждены regressions;
+существенных открытых findings нет. Пять существующих SWIG warnings сохраняются.
+
+## M12-A — conservative scalar normalizers
+
+Реализованы `NormalizerRegistry`, immutable snapshots и configurable pure
+`Normalizer` protocol. Встроены trim/empty-to-null, boolean, integer/Decimal/money,
+date/datetime с явной locale и UTC offset, phone/email canonical checks и UUID.
+Результат сохраняет raw/input/output, каждый вызов и каждую transformation;
+failed chain атомарно возвращает исходное значение. Неоднозначные даты/числа
+отклоняются. Встроенные операции не выполняют I/O и не читают process locale.
+
+`normalize_value()` сохраняет полный исходный `NormalizedValue`, включая
+ParsePlan selection и provenance. Legacy DTO/wire/hash не изменены; schema 1.3.0,
+batch integration и сквозной record engine остаются отдельной работой.
+Новых production dependencies нет. Shared locale grammar выделена из M8 без
+изменения его inference semantics.
+
+[API и пример](../normalization.md), [план M12](../plans/M12_validation_engine.md),
+[приёмка scalar scope](../plans/M12_A_normalizers_acceptance.md),
+[архитектурное решение](../adr/0022-conservative-normalization-and-validation.md).
+
+Проверки scalar scope: **100 normalization**, **3408 основных**, **26 integration**,
+**810 security**, **104 PostgreSQL** tests — passed. Ruff **400 файлов**, mypy
+**396 файлов**, lock-check и offline distribution verification — OK.
 
 ## M11 — MappingPlan Validator
 

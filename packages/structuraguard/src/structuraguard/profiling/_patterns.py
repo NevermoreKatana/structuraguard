@@ -1,10 +1,8 @@
 """Закрытые bounded recognizers; locale задан явно, содержимое не исполняется."""
 
 import re
-from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
 from ipaddress import IPv6Address
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -22,16 +20,12 @@ from structuraguard.contracts.profiling import (
     ProfileReason,
     TypeKind,
 )
+from structuraguard.domain.scalar_grammar import date_candidates
+from structuraguard.domain.scalar_grammar import decimal_candidates as _numbers
 
 _EMAIL = re.compile(
     r"[A-Za-z0-9.!#$%&\'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}",
     re.ASCII,
-)
-_RU_NUMBER = re.compile(
-    r"[+-]?(?:[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+)(?:,[0-9]+)?", re.ASCII
-)
-_EN_NUMBER = re.compile(
-    r"[+-]?(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?", re.ASCII
 )
 _CURRENCY = re.compile(r"(RUB|USD|EUR|GBP|₽|\$|€|£|руб\.?)", re.IGNORECASE)
 _PHONE = re.compile(
@@ -89,48 +83,8 @@ def _inn(text: str) -> PatternCode | None:
     return "russian_inn_12" if (first, second) == (digits[10], digits[11]) else None
 
 
-def _numbers(text: str, locale: LocalePolicy) -> set[Decimal]:
-    values: set[Decimal] = set()
-    if locale in (
-        LocalePolicy.UNSPECIFIED,
-        LocalePolicy.RU_RU,
-    ) and _RU_NUMBER.fullmatch(text):
-        values.add(
-            Decimal(
-                text.replace(" ", "")
-                .replace("\u00a0", "")
-                .replace("\u202f", "")
-                .replace(",", ".")
-            )
-        )
-    if locale != LocalePolicy.RU_RU and _EN_NUMBER.fullmatch(text):
-        values.add(Decimal(text.replace(",", "")))
-    return values
-
-
 def _dates(text: str, locale: LocalePolicy, result: Scan) -> None:
-    dates: set[date] = set()
-    if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", text):
-        with suppress(ValueError):
-            dates.add(date.fromisoformat(text))
-    if locale in (LocalePolicy.UNSPECIFIED, LocalePolicy.RU_RU) and re.fullmatch(
-        r"[0-9]{2}\.[0-9]{2}\.[0-9]{4}", text
-    ):
-        day, month, year = (int(p) for p in text.split("."))
-        with suppress(ValueError):
-            dates.add(date(year, month, day))
-    if re.fullmatch(r"[0-9]{2}/[0-9]{2}/[0-9]{4}", text):
-        first, second, year = (int(p) for p in text.split("/"))
-        pairs: tuple[tuple[int, int], ...] = (
-            ((first, second),) if locale == LocalePolicy.EN_US else ((second, first),)
-        )
-        if locale == LocalePolicy.UNSPECIFIED:
-            pairs = ((first, second), (second, first))
-        if locale == LocalePolicy.RU_RU:
-            pairs = ()
-        for month, day in pairs:
-            with suppress(ValueError):
-                dates.add(date(year, month, day))
+    dates = date_candidates(text, locale)
     if dates:
         result.patterns.add("date")
         result.candidates.add("date")

@@ -17,9 +17,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
 
 _PORT_EXPORTS = frozenset(
     {
+        "ConstraintReader",
+        "ProvenanceValidator",
+        "JsonSchemaValidator",
         "MappingPlanValidator",
         "CandidateMapper",
         "NormalizedDataProfiler",
+        "Normalizer",
         "PIIClassifier",
         "AuditStore",
         "DatabaseAdapter",

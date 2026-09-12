@@ -49,6 +49,10 @@ nav:
   - Deterministic Mapper M9: deterministic-mapping.md
   - Semantic DB Mapper M10: llm-database-mapping.md
   - MappingPlan Validator M11: mapping-plan-validation.md
+  - Scalar normalization M12-A: normalization.md
+  - JSON Schema validation M12-B: json-schema-validation.md
+  - DB constraints и rules M12-C: db-business-validation.md
+  - Provenance и ValidationReport M12-D: provenance-validation.md
   - Структурный разбор M5: structure.md
   - LLM providers и routing M6: llm.md
   - LLM semantic parsing M6: llm-semantic-parsing.md
@@ -77,7 +81,12 @@ nav:
       - Deterministic mapping candidates: adr/0019-deterministic-mapping-candidates.md
       - Semantic mapping proposals: adr/0020-llm-semantic-mapping-proposals.md
       - MappingPlan validation: adr/0021-mapping-plan-validation.md
+      - Conservative normalization и validation: adr/0022-conservative-normalization-and-validation.md
+      - Локальный JSON Schema профиль: adr/0023-local-json-schema-validation.md
+      - Deterministic DB constraints и DSL: adr/0024-deterministic-record-constraints.md
+      - Provenance replay и ValidationReport: adr/0025-provenance-replay-and-validation-report.md
   - Планы:
+      - Приёмка M12-C constraints: plans/M12_C_constraints_acceptance.md
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
       - M02 — domain contracts: plans/M02_domain_contracts.md
@@ -102,3 +111,9 @@ nav:
       - M11 — MappingPlan Validator: plans/M11_mapping_plan_validator.md
       - M11 — приёмка: plans/M11_acceptance.md
       - M11 — security review: plans/M11_security_review.md
+      - M12 — Validation Engine: plans/M12_validation_engine.md
+      - M12 — аудит критериев: plans/M12_acceptance_audit.md
+      - M12 — security review: plans/M12_security_review.md
+      - M12-A — приёмка scalar normalizers: plans/M12_A_normalizers_acceptance.md
+      - M12-B — приёмка schema validator: plans/M12_B_schema_acceptance.md
+      - M12-D — приёмка provenance/report: plans/M12_D_provenance_acceptance.md
