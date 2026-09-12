@@ -542,7 +542,7 @@ cache для offline build/примеров с parser watchdog. Доступ к 
 |---|---|
 | Сквозной engine, projection/reverse index, MappingPlan/catalog revalidation, schema 1.3 и новые consumers | Реализации пока нет; standalone tests не закрывают эти критерии |
 | Автоматическое объединение stream между уровнями и loader/staging commit/rollback | Coordinator не реализован; запись не входит в поставленный API A–D |
-| Другие ОС и версии Python | Локальная среда — macOS/Python 3.12.9; CI matrix здесь не запускалась |
+| Другие ОС и версии Python | На этапе подготовки проверена macOS/Python 3.12.9; последующая проверка 3.13/3.14 описана [ниже](#m12-import-python-matrix). Linux/Windows после исправления локально не запускались |
 | Production-scale benchmark и абсолютные wall-clock/RSS caps | Проверены конечные budgets и adversarial cases; отдельный нагрузочный benchmark не выполнялся, process isolation отсутствует |
 | Реальные LLM API и рабочие БД | Не требуются для deterministic validators; используются fakes, SQLite и временные PostgreSQL 16/18, платные API не вызывались |
 | Полный актуальный CVE-аудит всех транзитивных dependencies | В scope review проверены новые dependencies и lock; внешний vulnerability feed не запрашивался |
@@ -551,6 +551,61 @@ cache для offline build/примеров с parser watchdog. Доступ к 
 Полные runtime/build gates не повторялись после изменения только этого плана и
 `PROJECT_STATE.md`: production, tests, dependencies и настройки сборки не менялись.
 Актуальные результаты после последнего изменения Python-кода приведены выше.
+
+## CI regression на Python 3.13/3.14 — 2026-09-13 {#m12-import-python-matrix}
+
+Пользовательский CI выявил один failure в attribution import probe при остальных
+3810 passed. Дефект воспроизведён на macOS с Python 3.13.11 и 3.14.2: в обеих
+версиях исходный smoke suite дал 1 failed / 1 passed. Import chain:
+`validation.provenance` → `profiling` → `_patterns` → `urllib.parse`.
+В Python 3.12 `pathlib` заранее импортировал `urllib.parse`; с 3.13 импорт отложен.
+Подготовка attribution случайно зависела от этого побочного прогрева.
+
+В `_prepare_attribution_dependencies()` явно добавлен только `urllib.parse`.
+Runtime API, dependency lock, CI matrix и allowlist/guards не менялись.
+Добавленные проверки в `tests/smoke/test_import_side_effects.py`:
+
+- `test_import_probe_does_not_depend_on_pathlib_warming_urllib` — два режима
+  в отдельном процессе после удаления `urllib` из `sys.modules`; attribution
+  воспроизводит исходное падение даже на 3.12.
+- `test_attribution_probe_forbids_sdk_reading_preloaded_stdlib` — тестовый SDK
+  прямо читает `urllib/parse.py` и получает `ForbiddenSideEffect`. Прогрев не
+  разрешает произвольный file I/O; self-checks network/process/env/logging guards
+  остаются включёнными в каждом запуске probe.
+
+После исправления узкий smoke suite: 5 passed на каждой из версий 3.12.9, 3.13.11
+и 3.14.2. Ruff format/check — 456 файлов, strict mypy — 452 файла, OK.
+Security/correctness review локального diff не выявил существенных findings.
+Установлены отдельные временные environments по `uv.lock`; рабочая `.venv`
+и package metadata не изменены. Полная готовность M12 остаётся частичной.
+
+```bash
+UV_CACHE_DIR=/Users/katana/.cache/uv UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m12-py313 uv sync --locked --all-packages --group dev --python /Users/katana/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/bin/python3.13
+UV_CACHE_DIR=/Users/katana/.cache/uv UV_PROJECT_ENVIRONMENT=/private/tmp/structuraguard-m12-py314 uv sync --locked --all-packages --group dev --python /Users/katana/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/bin/python3.14
+UV_CACHE_DIR=/private/tmp/structuraguard-m12-uv-cache uv run --locked --no-sync pytest -q packages/structuraguard/tests/smoke/test_import_side_effects.py
+/private/tmp/structuraguard-m12-py313/bin/python -m pytest -q packages/structuraguard/tests/smoke/test_import_side_effects.py
+/private/tmp/structuraguard-m12-py314/bin/python -m pytest -q packages/structuraguard/tests/smoke/test_import_side_effects.py
+UV_CACHE_DIR=/private/tmp/structuraguard-m12-uv-cache make lint typecheck
+```
+
+Финальные проверки после исправления:
+
+| Команда | Результат |
+|---|---|
+| `/private/tmp/structuraguard-m12-py313/bin/python -m pytest -q` | 3814 passed, 116 deselected, 5 SWIG warnings; 146.45 s |
+| `/private/tmp/structuraguard-m12-py314/bin/python -m pytest -q` | 3814 passed, 116 deselected, 5 SWIG warnings; 150.62 s |
+| `UV_CACHE_DIR=/Users/katana/.cache/uv make test test-build` | Python 3.12: 3814 passed, 116 deselected; offline wheel/sdist и `distribution verification OK`, включая оба режима установленного import probe |
+| `UV_CACHE_DIR=/private/tmp/structuraguard-m12-uv-cache make docs` | Strict build и внутренние links/anchors — OK |
+| `git diff --check` | Exit 0; изменены только два smoke files и план/state, новых artifacts нет |
+
+Full suites выполнены на macOS; исправленный Linux CI и Windows не запускались.
+116 PostgreSQL cases исключены штатным marker: DB-код и DB tests не менялись;
+отдельный `make test-database` в этом исправлении не повторялся. Non-DB integration
+и security включены в каждый основной suite. Runtime dependencies установлены
+по прежнему lock; платные API не использовались. Исходный offline sync 3.13
+потребовал недостающий SQLAlchemy wheel, затем locked sync завершился успешно;
+рабочая `.venv` сохранена. Средовой отказ `uv python list` в sandbox устранён
+успешным read-only запуском вне sandbox.
 
 ## Риски
 

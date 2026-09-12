@@ -2,6 +2,24 @@
 
 Обновлено: 2026-09-13.
 
+## M12 — исправление import probe на Python 3.13/3.14
+
+Воспроизведено падение CI на Python 3.13.11 и 3.14.2: attribution probe запрещал
+первый import `urllib.parse`, необходимый profiling через provenance validator.
+Python 3.12 скрывал зависимость, заранее импортируя этот модуль через `pathlib`.
+В подготовке attribution явно прогревается только `urllib.parse`; guards,
+black-box import и production-код не изменены.
+
+Добавлены три regression/control cases: cold `urllib` в обоих режимах и запрет
+прямого чтения SDK файла прогретой stdlib. Cold attribution падает до исправления
+также на 3.12. После исправления smoke suite проходит на Python 3.12.9, 3.13.11
+и 3.14.2: по 5 passed. Ruff (456 файлов) и mypy (452 файла) — OK.
+Полный основной suite: по 3814 passed на каждой из трёх версий, 116 PostgreSQL
+cases deselected. Offline wheel/sdist verification на 3.12 прошла, включая оба
+режима import probe установленного пакета. Linux CI после правки здесь не запускался.
+Причина, команды и границы проверки — в
+[плане M12](../plans/M12_validation_engine.md#m12-import-python-matrix).
+
 ## M12 — подготовка к ручному commit и PR
 
 Самостоятельные сервисы A–D готовы к отдельному PR в `main`; полный M12 остаётся

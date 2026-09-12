@@ -671,6 +671,9 @@ def _prepare_attribution_dependencies() -> None:
         "json",
         "math",
         "re",
+        # Profiling использует urlsplit; начиная с Python 3.13 pathlib
+        # больше не прогревает этот stdlib import до установки guards.
+        "urllib.parse",
     ):
         importlib.import_module(module_name)
     pydantic = importlib.import_module("pydantic")
