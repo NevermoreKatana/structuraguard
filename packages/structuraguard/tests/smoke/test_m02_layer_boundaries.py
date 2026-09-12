@@ -26,7 +26,21 @@ _ALLOWED_EXTERNAL_ROOTS = {
             "unicodedata",
         }
     ),
-    "domain": frozenset({"__future__", "collections", "hashlib", "heapq", "typing"}),
+    # M12: calendar/Decimal/closed regex grammars — pure stdlib, без I/O.
+    "domain": frozenset(
+        {
+            "__future__",
+            "collections",
+            "hashlib",
+            "heapq",
+            "dataclasses",  # M12: frozen key semantics, без I/O.
+            "uuid",  # M12: UUID parsing, без генерации/randomness.
+            "typing",
+            "datetime",
+            "decimal",
+            "re",
+        }
+    ),
     "ports": frozenset({"__future__", "collections", "dataclasses", "typing"}),
 }
 

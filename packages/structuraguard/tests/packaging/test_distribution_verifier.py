@@ -58,6 +58,24 @@ verify_installed_wheel = cast(
 )
 
 
+@pytest.mark.parametrize(
+    ("requirement", "expected", "accepted"),
+    [
+        ("jsonschema<5,>=4.26", "jsonschema>=4.26,<5", True),
+        ("referencing<0.38,>=0.37", "referencing>=0.37,<0.38", True),
+        ("jsonschema<6,>=4.26", "jsonschema>=4.26,<5", False),
+        ("referencing>=0.37", "referencing>=0.37,<0.38", False),
+    ],
+)
+def test_runtime_bounds_ignore_order_without_widening_versions(
+    requirement: str, expected: str, accepted: bool
+) -> None:
+    check = cast(
+        Callable[[str, str], bool], VERIFIER_NAMESPACE["_has_exact_requirement_bounds"]
+    )
+    assert check(requirement, expected) is accepted
+
+
 def test_distribution_manifest_covers_current_package_sources() -> None:
     source_root = REPOSITORY_ROOT / "packages/structuraguard/src"
     package_root = source_root / "structuraguard"

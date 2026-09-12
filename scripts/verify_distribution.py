@@ -39,6 +39,37 @@ _SDIST_ROOT = f"{_DISTRIBUTION_NAME}-{_VERSION}"
 
 _PACKAGE_FILES = frozenset(
     {
+        "structuraguard/contracts/provenance.py",
+        "structuraguard/ports/provenance.py",
+        "structuraguard/validation/provenance.py",
+        "structuraguard/validation/reporting.py",
+        "structuraguard/validation/_bounded.py",
+        "structuraguard/contracts/record_validation.py",
+        "structuraguard/contracts/business_rules.py",
+        "structuraguard/contracts/constraint_validation.py",
+        "structuraguard/domain/constraint_semantics.py",
+        "structuraguard/domain/constraint_values.py",
+        "structuraguard/validation/business_rules.py",
+        "structuraguard/validation/db_constraints.py",
+        "structuraguard/validation/_rule_input.py",
+        "structuraguard/validation/_db_values.py",
+        "structuraguard/ports/validation.py",
+        "structuraguard/database/constraint_reader.py",
+        "structuraguard/database/_constraint_queries.py",
+        "structuraguard/contracts/json_schema.py",
+        "structuraguard/ports/json_schema.py",
+        "structuraguard/validation/__init__.py",
+        "structuraguard/validation/json_schema.py",
+        "structuraguard/validation/_schema_input.py",
+        "structuraguard/validation/_schema_regex.py",
+        "structuraguard/validation/_schema_backend.py",
+        "structuraguard/contracts/normalization.py",
+        "structuraguard/ports/normalization.py",
+        "structuraguard/domain/scalar_grammar.py",
+        "structuraguard/normalization/__init__.py",
+        "structuraguard/normalization/_boundary.py",
+        "structuraguard/normalization/registry.py",
+        "structuraguard/normalization/builtins.py",
         "structuraguard/contracts/mapping_rules.py",
         "structuraguard/contracts/mapping_validation.py",
         "structuraguard/mapping/validation.py",
@@ -206,6 +237,61 @@ _PUBLIC_EXPORTS = frozenset(
 )
 _CONTRACT_EXPORTS = frozenset(
     {
+        "ArtifactValueReference",
+        "DetailedValidationReport",
+        "NormalizationBinding",
+        "ProvenanceLimits",
+        "ProvenancePolicy",
+        "SourceEvidenceLocation",
+        "ValidationFinding",
+        "ValidationIssueCount",
+        "ValidationLayer",
+        "ValidationLayerResult",
+        "ValidationLineage",
+        "ValidationSafeSummary",
+        "ValueProvenanceEvidence",
+        "RecordValidationLimits",
+        "ValidationCell",
+        "ValidationRecord",
+        "ValidationDataset",
+        "RecordValidationIssue",
+        "RecordValidationResult",
+        "RuleField",
+        "FieldOperand",
+        "LiteralOperand",
+        "ProductOperand",
+        "ComparisonRule",
+        "RequiredIfRule",
+        "PresenceRule",
+        "SumEqualsRule",
+        "ItemCountRule",
+        "UniqueByRule",
+        "MatchesReferenceRule",
+        "ReferenceKey",
+        "RuleReference",
+        "BusinessRuleSet",
+        "ConstraintTablePolicy",
+        "CheckRuleBinding",
+        "ConstraintValidationPolicy",
+        "ConstraintLookup",
+        "ConstraintReadRequest",
+        "ConstraintMatch",
+        "ConstraintReadResult",
+        "ConstraintReadPolicy",
+        "JsonSchemaCacheInfo",
+        "JsonSchemaIssue",
+        "JsonSchemaPolicy",
+        "JsonSchemaResource",
+        "JsonSchemaResult",
+        "NormalizationLimits",
+        "NormalizationPolicy",
+        "NormalizationResult",
+        "NormalizationStep",
+        "NormalizerDescriptor",
+        "NormalizerOutput",
+        "NormalizerParameter",
+        "NormalizerSpec",
+        "ValueTransformation",
         "MappingIdentity",
         "MappingRelation",
         "MappingIssueLocation",
@@ -443,6 +529,10 @@ _DOMAIN_EXPORTS = frozenset(
 )
 _PORT_EXPORTS = frozenset(
     {
+        "ProvenanceValidator",
+        "ConstraintReader",
+        "JsonSchemaValidator",
+        "Normalizer",
         "MappingPlanValidator",
         "CandidateMapper",
         "NormalizedDataProfiler",
@@ -572,6 +662,11 @@ _FORBIDDEN_OPTIONAL_IMPORTS = frozenset(
 )
 _CORE_RUNTIME_CLOSURE = frozenset(
     {
+        "attrs",
+        "jsonschema",
+        "jsonschema-specifications",
+        "referencing",
+        "rpds-py",
         "annotated-types",
         "charset-normalizer",
         "pydantic",
@@ -776,6 +871,16 @@ def _canonical_requirement(requirement: str) -> str:
     return f"{_normalize_name(match.group(1))}{suffix}"
 
 
+def _has_exact_requirement_bounds(requirement: str, expected: str) -> bool:
+    name = _requirement_name(expected)
+    if _requirement_name(requirement) != name:
+        return False
+    # Wheel metadata вправе переставлять specifiers без изменения смысла.
+    actual_bounds = _canonical_requirement(requirement).removeprefix(name).split(",")
+    expected_bounds = _canonical_requirement(expected).removeprefix(name).split(",")
+    return sorted(actual_bounds) == sorted(expected_bounds)
+
+
 def _is_pydantic_v2(requirement: str) -> bool:
     compact = _canonical_requirement(requirement)
     if not compact.startswith("pydantic"):
@@ -881,10 +986,15 @@ def _validate_dependency_contract(
     runtime_by_name = {_requirement_name(item): item for item in runtime}
     if len(runtime_by_name) != len(runtime):
         raise _fail(f"{source}: base dependencies содержат дубликаты")
-    if set(runtime_by_name) != {"charset-normalizer", "pydantic"}:
+    if set(runtime_by_name) != {
+        "charset-normalizer",
+        "pydantic",
+        "jsonschema",
+        "referencing",
+    }:
         raise _fail(
             f"{source}: base dependencies должны быть ровно "
-            "Pydantic v2 и charset-normalizer v3"
+            "Pydantic v2, charset-normalizer v3, jsonschema v4 и referencing v0.37"
         )
     if not _is_pydantic_v2(runtime_by_name["pydantic"]):
         raise _fail(f"{source}: Pydantic должен быть ограничен major-версией 2")
@@ -892,6 +1002,11 @@ def _validate_dependency_contract(
         raise _fail(
             f"{source}: charset-normalizer должен быть ограничен диапазоном >=3.4,<4"
         )
+
+    for expected in ("jsonschema>=4.26,<5", "referencing>=0.37,<0.38"):
+        name = _requirement_name(expected)
+        if not _has_exact_requirement_bounds(runtime_by_name[name], expected):
+            raise _fail(f"{source}: неподдержанный диапазон {name}")
 
     canonical_by_extra: dict[str, set[str]] = {}
     for extra, extra_requirements in by_extra.items():
@@ -1602,6 +1717,8 @@ def _probe_source(
         if len(runtime_names) != len(set(runtime_names)) or set(runtime_names) != {{
             "charset-normalizer",
             "pydantic",
+            "jsonschema",
+            "referencing",
         }}:
             raise SystemExit(f"unexpected runtime requirements: {{runtime}}")
 
@@ -1625,7 +1742,7 @@ def _probe_source(
         import structuraguard.structure as structure
         import structuraguard.parsing as semantic_parsing
 
-        if set(database.__all__) != {{"InspectionLimits", "SQLiteDatabaseAdapter", "SQLiteTarget", "PostgreSQLDatabaseAdapter", "PostgreSQLTarget"}}:
+        if set(database.__all__) != {{"DatabaseConstraintReader", "InspectionLimits", "SQLiteDatabaseAdapter", "SQLiteTarget", "PostgreSQLDatabaseAdapter", "PostgreSQLTarget"}}:
             raise SystemExit("unexpected database exports")
         if "sqlalchemy" in sys.modules:
             raise SystemExit("database import must not require SQLAlchemy")

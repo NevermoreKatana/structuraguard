@@ -22,6 +22,7 @@ from structuraguard.contracts.parsing import (
     TreeParsePlan,
     TreePathSelector,
 )
+from structuraguard.contracts.source import ExtractedBatch
 from structuraguard.parsers.builtin import HtmlParser, MarkdownParser, XmlParser
 from structuraguard.ports.parser import Parser
 from structuraguard.structure import StructuralProfiler
@@ -46,6 +47,28 @@ async def test_explicit_markup_scope_preserves_literal_paths_and_raw_text(
     content: bytes,
     expected: list[str],
 ) -> None:
+    request, batches = await explicit_markup_request(parser, content)
+    output = await execute(request, batches)
+    assert [
+        v.raw_value.value
+        for b in output
+        for r in b.records
+        for e in r.entities
+        for v in e.values
+    ] == expected
+    physical = {ref for batch in batches for ref in batch.physical_refs()}
+    assert all(
+        ref in physical
+        for batch in output
+        for r in batch.records
+        for ref in r.source_refs
+    )
+
+
+async def explicit_markup_request(
+    parser: Parser, content: bytes
+) -> tuple[ParsePlanValidationRequest, tuple[ExtractedBatch, ...]]:
+    """Построить прежний explicit plan для переиспользования replay contract tests."""
     source = source_for(content, display_name="explicit")
     batches = await collect(
         parser, source, contexts_for(source, content, batch_size=1)[1]
@@ -147,18 +170,4 @@ async def test_explicit_markup_scope_preserves_literal_paths_and_raw_text(
     request = ParsePlanValidationRequest(
         plan=plan, source=manifest.source, manifest=manifest, profile=profile
     )
-    output = await execute(request, batches)
-    assert [
-        v.raw_value.value
-        for b in output
-        for r in b.records
-        for e in r.entities
-        for v in e.values
-    ] == expected
-    physical = {ref for batch in batches for ref in batch.physical_refs()}
-    assert all(
-        ref in physical
-        for batch in output
-        for r in batch.records
-        for ref in r.source_refs
-    )
+    return request, batches

@@ -748,11 +748,19 @@ def run_probe(mode: str) -> None:
         contracts_module = importlib.import_module("structuraguard.contracts")
         domain_module = importlib.import_module("structuraguard.domain")
         ports_module = importlib.import_module("structuraguard.ports")
+        validation_module = importlib.import_module("structuraguard.validation")
+        normalization_module = importlib.import_module("structuraguard.normalization")
+        normalization_registry = normalization_module.NormalizerRegistry.with_builtins()
+        normalization_snapshot = normalization_registry.freeze()
+        if not normalization_snapshot.descriptors:
+            raise ForbiddenSideEffect("normalizer registry contains no built-ins")
         for checked_module in (
             contracts_module,
             domain_module,
             parsers_module,
             ports_module,
+            normalization_module,
+            validation_module,
         ):
             exports = tuple(checked_module.__all__)
             if len(exports) != len(set(exports)):
