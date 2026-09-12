@@ -26,6 +26,7 @@ from .database import (
     DatabaseCatalog,
     MappingPolicyRef,
 )
+from .mapping_rules import MappingIdentity, MappingRelation, MappingValidationEvidence
 from .normalized import (
     NormalizedDatasetManifest,
     SemanticFieldRef,
@@ -87,7 +88,13 @@ class FieldMapping(FrozenContract):
 
 
 class MappingPlan(FrozenContract):
-    """Декларативно связывает normalized fields с catalog targets без SQL."""
+    """Декларативно связать normalized fields с catalog targets без SQL.
+
+    Конструктор проверяет форму и content fingerprint, но не заменяет M11.
+    identities и relations доступны в версии 1.1.0. При значении None новые поля
+    исключены из wire/hash для совместимости с планами 1.0.0. Передача DTO
+    в MappingPlanValidator не разрешает I/O или исполнение текста плана.
+    """
 
     plan_id: IdentifierStr
     schema_version: SchemaVersionStr = "1.0.0"
@@ -104,9 +111,21 @@ class MappingPlan(FrozenContract):
     operation: LoadOperation
     confidence: FiniteDecimal
     producer: ProducerMetadata
+    identities: tuple[MappingIdentity, ...] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    relations: tuple[MappingRelation, ...] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_plan(self) -> Self:
+        if self.schema_version not in {"1.0.0", "1.1.0"}:
+            raise ValueError("неподдерживаемая версия MappingPlan")
+        if self.schema_version == "1.0.0" and (
+            self.identities is not None or self.relations is not None
+        ):
+            raise ValueError("identity/relation descriptors требуют MappingPlan 1.1.0")
         _validate_confidence(self.confidence)
         if not self.mappings:
             raise ValueError("mapping plan must contain at least one mapping")
@@ -194,7 +213,11 @@ class MappingPlanValidationRequest(FrozenContract):
 class ValidatedMappingPlan(FrozenContract):
     """Хранит evidence успешной независимой проверки ``MappingPlan``.
 
-    Evidence не является полномочием на запись и не заменяет ``LoadContext``.
+    M11 выдаёт wrapper только при ACCEPTED с заполненным evidence. Отсутствие
+    evidence допускается для legacy snapshots. Создание DTO вручную не запускает
+    правила M11; согласованные hashes не удостоверяют автора. Полный wrapper
+    чувствителен и не является полномочием на запись, не заменяет ``LoadContext``,
+    свежий inspection и проверку значений записей.
     """
 
     plan: MappingPlan
@@ -209,9 +232,16 @@ class ValidatedMappingPlan(FrozenContract):
     target_policy_fingerprint: FingerprintStr
     decision: Literal[ValidationDecision.ACCEPTED] = ValidationDecision.ACCEPTED
     issues: tuple[ValidationIssue, ...] = ()
+    evidence: MappingValidationEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_evidence(self) -> Self:
+        if self.evidence is not None and len(self.evidence.locations) != len(
+            self.issues
+        ):
+            raise ValueError("mapping evidence locations не соответствуют issues")
         _reject_physical_issue_refs(self.issues)
         self.plan.validate_content_fingerprint()
         if self.plan_fingerprint != self.plan.fingerprint:
@@ -233,7 +263,14 @@ class ValidatedMappingPlan(FrozenContract):
 
 
 class MappingPlanValidationResult(FrozenContract):
-    """Результат проверки, не выдающий checked wrapper при отказе."""
+    """Сохранить решение, независимые issues и bindings проверки MappingPlan.
+
+    validated_plan присутствует только при ACCEPTED; REJECTED и NEEDS_REVIEW
+    не допускают wrapper. В M11 evidence заполнен и содержит locations в порядке
+    issues; None сохраняет совместимость с legacy snapshots. Полный result
+    чувствителен: для диагностики используйте codes и числовые locations.
+    Решение относится к переданным снимкам и не разрешает DB writes.
+    """
 
     validator_id: IdentifierStr
     validator_version: VersionStr
@@ -250,9 +287,21 @@ class MappingPlanValidationResult(FrozenContract):
     decision: ValidationDecision
     issues: tuple[ValidationIssue, ...] = ()
     validated_plan: ValidatedMappingPlan | None = None
+    evidence: MappingValidationEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_outcome(self) -> Self:
+        if self.evidence is not None and len(self.evidence.locations) != len(
+            self.issues
+        ):
+            raise ValueError("mapping result locations не соответствуют issues")
+        if (
+            self.validated_plan is not None
+            and self.evidence != self.validated_plan.evidence
+        ):
+            raise ValueError("mapping result evidence не соответствует wrapper")
         _reject_physical_issue_refs(self.issues)
         if self.decision is ValidationDecision.ACCEPTED:
             if self.validated_plan is None:

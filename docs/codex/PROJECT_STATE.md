@@ -1,10 +1,129 @@
 # Состояние проекта StructuraGuard
 
-Обновлено: 2026-09-11.
+Обновлено: 2026-09-12.
+
+## M11 — MappingPlan Validator
+
+Реализован отдельный async `mapping.MappingPlanValidator` с typed/JSON входами,
+явными policy/options и отчётом всех применимых независимых issues. Проверка
+использует готовые manifest, catalog-v1 и optional M8 profile без I/O, LLM,
+генерации SQL и изменения снимков. ACCEPTED выдаёт wrapper с evidence;
+REJECTED/NEEDS_REVIEW и непригодный JSON не дают wrapper. Коды и порядок отчёта
+детерминированы; полные result и policy чувствительны.
+
+Подтверждены schema/table/column scope с приоритетом deny, existence/writability,
+required targets, types и numeric scale, identity/upsert, ordered composite FK,
+confidence, fingerprints и schema drift. Source PK permission проверяется
+для каждой записываемой PK колонки, даже при выборе другого unique key.
+MappingPlan 1.1.0 добавляет identity/relation descriptors с сохранением legacy
+wire/hash. Для malformed input предусмотрен отдельный ограниченный intake report.
+Превышение budget вызывает typed error без частичного acceptance.
+
+[API, копируемый пример, исключения и ограничения](../mapping-plan-validation.md),
+[план](../plans/M11_mapping_plan_validator.md),
+[матрица приёмки](../plans/M11_acceptance.md),
+[security review](../plans/M11_security_review.md),
+[ADR 0021](../adr/0021-mapping-plan-validation.md).
+Канонический [M11 в ТЗ](https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m11-mappingplan-validator);
+ссылки на §14.1, §16, §18 и §20.3–20.4 собраны в руководстве API.
+
+Тестовый аудит и security review устранили выявленные дефекты; их матрицы,
+воспроизведения и результаты сохранены в отдельных отчётах выше. Новых production
+dependencies нет. Реальные платные LLM API не использовались.
+
+### Готовность к ручному commit и PR — 2026-09-12
+
+M11 готов к ручному commit и последующему PR в `main` в утверждённом scope.
+Все семь критериев приёмки подтверждены; существенных незакрытых findings нет.
+В [checklist подготовки](../plans/M11_mapping_plan_validator.md#m11-commit-readiness)
+сохранены фактические команды, причины непроверенных сценариев и список всех
+**47 файлов** для commit. Commit, staging, push и PR автоматически не выполнялись.
+
+После окончательного ограничения FK aliases повторён полный прогон:
+**3290 основных**, **26 integration**, **782 security**, **104 PostgreSQL** tests
+на версиях 16/18 — passed; offline distribution verification — OK.
+Дополнительно: **130 docs tests**, Ruff **387 файлов**, mypy **383 файла**,
+lock-check, strict MkDocs и whitespace — OK. Проверка состава diff не обнаружила
+признаков secrets, debug artifacts или случайных generated files; build outputs
+и кэши исключены из Git. Пять существующих SWIG warnings сохраняются.
+
+Локальные проверки выполнены на macOS/Python 3.12.9. Удалённая CI-матрица
+Ubuntu/Python 3.12–3.14 ожидает ручной публикации. Нагрузочный benchmark на верхних
+лимитах, live grants, TOCTOU и record/load semantics этим прогоном не подтверждены;
+их границы и причины указаны в checklist подготовки.
+
+### Исправления финального review M11 — 2026-09-12
+
+Закрыты четыре Medium: известный overflow PostgreSQL `real` больше не получает
+wrapper; unique index с повтором колонки не срывает отчёт; FK между известными
+PostgreSQL integer типами разных размеров допускается с сохранением проверки
+диапазона записываемых значений; неполные DTO дают SDK `MAPPING_PLAN_INVALID`.
+Публичные сигнатуры, DTO, error codes и scope сохранены; production changes
+ограничены четырьмя M11 helpers. Новых production dependencies нет.
+
+[Матрица findings → regression tests и команды](../plans/M11_acceptance.md#m11-review-fixes).
+Добавлен **31 case**: 17 unit, 6 security и 8 PostgreSQL. Узкие проверки:
+**23 новых unit/security**, **462 mapping**, **20 M11 PostgreSQL** — passed;
+Ruff **387 файлов**, mypy **383 файла** — OK.
+Полные gates: **3290 основных**, **26 integration**, **782 security**,
+**104 PostgreSQL** tests — passed; strict docs и offline distribution verification
+— OK. После окончательного ограничения FK aliases повторены regression cases,
+lint/typecheck и проверка дистрибутива. Пять прежних SWIG warnings сохраняются.
+
+Повторный review исправлений не выявил существенных findings. Платные LLM API
+не вызывались; тесты, lint/typecheck и security gates не ослаблялись.
+Benchmark на верхних лимитах отдельно не проводился. Live grants, TOCTOU и
+record/load semantics по-прежнему относятся к будущим этапам.
+
+### Документация M11 — проверка 2026-09-12
+
+Уточнены русские public docstrings сервиса, port и contracts M11 без изменения
+полей или сигнатур. Руководство различает полный sensitive result и диагностические
+codes/locations, объясняет decisions, intake completeness, исключения, лимиты,
+legacy версии и security semantics. Новый ADR не потребовался: долгоживущая
+граница независимой проверки уже зафиксирована в ADR 0021.
+
+`tests/docs/test_m11_examples.py` извлекает копируемый блок из руководства и
+исполняет девять сценариев на синтетических снимках с запретом сети/DB calls:
+insert, upsert, запрещённый target, malformed JSON, SQL-фрагмент, низкий confidence,
+drift, неподтверждённый тип и лимит. Проверяются decision/codes, отсутствие wrapper
+при отказе и неизменность входов. До появления блока девять cases падали;
+после добавления — проходят.
+
+Свежие проверки после обновления docstrings и примера:
+
+| Команда | Фактический результат |
+|---|---|
+| `uv run --locked --no-sync pytest -q --tb=short packages/structuraguard/tests/docs/test_m11_examples.py` | **9 passed** |
+| Узкий M11 набор: тот же пример, `unit/contracts/test_m11_validation_contracts.py`, `contract/mapping/test_m11_validation_port.py`, `unit/mapping/test_m11_validation.py` | **16 passed**, включая legacy wire/hash и одинаковое evidence typed/JSON входов |
+| `uv run --locked --no-sync pytest -q --tb=short packages/structuraguard/tests/docs` | **130 passed** |
+| `make lint` / `make typecheck` | Ruff **384 файла**, mypy **380 файлов**, OK |
+| `make test` | **3267 passed**, **96 deselected**, 5 существующих SWIG warnings |
+| `make test-integration` | **26 passed**, **3337 deselected**, 5 существующих SWIG warnings |
+| `make test-security` | **776 passed** |
+| `make test-database` | **96 passed** на PostgreSQL 16/18; SAWarning как error |
+| `make docs` | Strict MkDocs build с проверкой внутренних ссылок/anchors — OK |
+| `make test-build` | Offline wheel/sdist rebuild, isolated install и examples smoke — **distribution verification OK** |
+| Локальная проверка canonical links / `git diff --check` | **6 anchors** ТЗ существуют, whitespace — OK |
+
+Для локальных узких проверок, lint/typecheck и docs использован
+`UV_CACHE_DIR=/private/tmp/structuraguard-m11-uv-cache`. Полная команда
+`PYTEST_ADDOPTS='-q --tb=short' make test test-integration test-security test-database test-build`
+завершилась с exit code 0. Доступ за пределами sandbox понадобился системному
+memory watchdog, loopback, Docker и штатному UV cache для offline packaging.
+Реальные платные LLM API не вызывались. Проверки не ослаблялись; выполнен review
+документации и изменений docstrings без изменения runtime логики.
+
+Граница готовности M11: проверка декларации по переданным снимкам. SDK facade,
+record engine, DB loader, живые grants/parent rows, generated-key propagation,
+цикл исполнения, dry-run, staging, транзакции и rollback ещё не реализованы этим
+milestone. Hash не удостоверяет источник policy/catalog и не закрывает TOCTOU;
+перед будущей записью требуются свежий scoped inspection и повторная проверка.
+Budgets не гарантируют OS/RSS или wall-clock isolation.
 
 ## M10 — LLM Semantic DB Mapper
 
-Текущий milestone реализован локально в scope semantic proposals:
+M10 реализован локально в scope semantic proposals:
 `LLMSemanticMapper.propose` использует M8 profile, M7 catalog, явный scope,
 deterministic top-k M9 и существующий M6 `PolicyAwareLLMRouter`. Новый provider
 protocol не добавлен. Для каждой связанной группы строится bounded masked payload;

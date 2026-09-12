@@ -48,6 +48,7 @@ nav:
   - Normalized Profiler M8: normalized-profiling.md
   - Deterministic Mapper M9: deterministic-mapping.md
   - Semantic DB Mapper M10: llm-database-mapping.md
+  - MappingPlan Validator M11: mapping-plan-validation.md
   - Структурный разбор M5: structure.md
   - LLM providers и routing M6: llm.md
   - LLM semantic parsing M6: llm-semantic-parsing.md
@@ -75,6 +76,7 @@ nav:
       - Bounded normalized profiling: adr/0018-bounded-normalized-profiling.md
       - Deterministic mapping candidates: adr/0019-deterministic-mapping-candidates.md
       - Semantic mapping proposals: adr/0020-llm-semantic-mapping-proposals.md
+      - MappingPlan validation: adr/0021-mapping-plan-validation.md
   - Планы:
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md
@@ -97,3 +99,6 @@ nav:
       - M10 — LLM database mapping: plans/M10_llm_database_mapping.md
       - M10 — приёмка: plans/M10_acceptance.md
       - M10 — security review: plans/M10_security_review.md
+      - M11 — MappingPlan Validator: plans/M11_mapping_plan_validator.md
+      - M11 — приёмка: plans/M11_acceptance.md
+      - M11 — security review: plans/M11_security_review.md

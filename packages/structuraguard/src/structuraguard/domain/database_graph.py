@@ -17,6 +17,43 @@ from structuraguard.contracts.database import (
 from ._database_catalog import CatalogInput, validated_metadata
 
 
+def dependency_order(
+    table_keys: dict[str, tuple[str, str, str]],
+    edges: tuple[ForeignKeyDependency, ...],
+) -> tuple[str, ...] | None:
+    """Упорядочить выбранные таблицы: родители раньше детей, без I/O и мутаций.
+
+    Args:
+        table_keys: Отображение table_id в ключ сортировки (schema, table, table_id).
+            Последний компонент должен совпадать с ключом отображения.
+        edges: Направленные FK-зависимости; повторы одной пары не влияют на порядок.
+
+    Returns:
+        Кортеж table IDs в стабильном порядке, пустой кортеж для пустого набора
+        или None при цикле, включая self-reference. Рёбра за пределами выбранных
+        узлов игнорируются. Caller предварительно проверяет ссылки и лимиты;
+        результат не подтверждает наличие parent rows и не разрешает запись.
+    """
+    children: dict[str, set[str]] = {node: set() for node in table_keys}
+    indegrees = dict.fromkeys(table_keys, 0)
+    for edge in edges:
+        parent, child = edge.parent_table_id, edge.child_table_id
+        if parent in children and child in children and child not in children[parent]:
+            children[parent].add(child)
+            indegrees[child] += 1
+    ready = [table_keys[node] for node in table_keys if not indegrees[node]]
+    heapq.heapify(ready)
+    order: list[str] = []
+    while ready:
+        node = heapq.heappop(ready)[2]
+        order.append(node)
+        for child in sorted(children[node], key=table_keys.__getitem__):
+            indegrees[child] -= 1
+            if not indegrees[child]:
+                heapq.heappush(ready, table_keys[child])
+    return tuple(order) if len(order) == len(table_keys) else None
+
+
 def _components(
     nodes: tuple[str, ...],
     children: dict[str, tuple[str, ...]],
@@ -172,17 +209,7 @@ def build_dependency_graph(catalog: CatalogInput) -> DatabaseDependencyGraph:
         node: tuple(sorted(values, key=node_key))
         for node, values in parent_sets.items()
     }
-    indegrees = {node: len(parents[node]) for node in nodes}
-    ready = [node_key(node) for node in nodes if not indegrees[node]]
-    heapq.heapify(ready)
-    order: list[str] = []
-    while ready:
-        node = heapq.heappop(ready)[2]
-        order.append(node)
-        for child in children[node]:
-            indegrees[child] -= 1
-            if not indegrees[child]:
-                heapq.heappush(ready, node_key(child))
+    order = dependency_order({node: node_key(node) for node in nodes}, edges) or ()
     self_references = tuple(
         edge for edge in edges if edge.parent_table_id == edge.child_table_id
     )

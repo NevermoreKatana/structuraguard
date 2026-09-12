@@ -4,11 +4,15 @@ LLM M6-A/B: [FakeLLMProvider, NoLLMProvider, OpenAICompatibleProvider и routing
 M6-C/D: [LLMStructureAnalyzer](llm-semantic-parsing.md) и
 [SemanticParsingSession с offline-примером](semantic-parsing.md).
 M8: [NormalizedDataProfiler, безопасная сводка и ограничения](normalized-profiling.md).
+M9: [DeterministicMapper](deterministic-mapping.md).
+M10: [LLMSemanticMapper и границы proposal](llm-database-mapping.md).
+M11: [MappingPlanValidator, полный отчёт и policy](mapping-plan-validation.md).
 Общая SDK facade пока не реализует LLM orchestration.
 
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
-текущей реализации M4, M5-A/B/C, bounded M6-A/B/C/D, M7 и M8 в описанном ниже
-scope. Facade-операции pipeline в эту поставку не входят.
+текущей реализации M4, M5-A/B/C, bounded M6-A/B/C/D, M7, M8, M9, M10 и M11 в
+scope соответствующих руководств. Facade-операции pipeline и DB loader
+в эту поставку не входят; M11 вызывается как отдельный сервис проверки.
 
 Начните с [копируемого примера CSV → NormalizedBatch](structure.md).
 Канонические требования M5: [FR-014][spec-fr-014] и [раздел M5][spec-m5].

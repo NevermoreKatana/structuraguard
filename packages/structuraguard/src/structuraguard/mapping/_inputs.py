@@ -34,6 +34,8 @@ def bounded_size(value: object, cap: int) -> int:
         size += 64
         if size > cap or depth > 64:
             raise failure("MAPPING_LIMIT_EXCEEDED", "input_size_or_depth")
+        if isinstance(item, float) and not float("-inf") < item < float("inf"):
+            raise failure("MAPPING_INPUT_INVALID", "non_finite_number")
         if isinstance(item, str | bytes):
             if len(item) > 65536:
                 raise failure("MAPPING_LIMIT_EXCEEDED", "scalar_bytes")
