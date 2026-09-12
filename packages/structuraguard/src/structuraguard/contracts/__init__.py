@@ -253,6 +253,18 @@ from structuraguard.contracts.source import (
     XPathLocation,
 )
 
+from .mapping_rules import (
+    MappingIdentity,
+    MappingIssueLocation,
+    MappingRelation,
+    MappingValidationEvidence,
+)
+from .mapping_validation import (
+    MappingPlanInputReport,
+    MappingValidationOptions,
+    MappingValidationPolicy,
+)
+
 __all__ = (
     "PARSER_ENTRY_POINT_GROUP",
     "AuditEvent",
@@ -346,12 +358,19 @@ __all__ = (
     "LogShapeObservation",
     "LogTokenSelector",
     "MappingCandidate",
+    "MappingIdentity",
+    "MappingIssueLocation",
     "MappingPlan",
+    "MappingPlanInputReport",
     "MappingPlanValidationRequest",
     "MappingPlanValidationResult",
     "MappingPolicyRef",
+    "MappingRelation",
     "MappingSafeSummary",
     "MappingScope",
+    "MappingValidationEvidence",
+    "MappingValidationOptions",
+    "MappingValidationPolicy",
     "MappingWeights",
     "NormalizedBatch",
     "NormalizedBatchSummary",

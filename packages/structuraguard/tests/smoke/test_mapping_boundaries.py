@@ -20,6 +20,7 @@ def test_mapper_imports_only_contracts_domain_and_explicit_pure_dependencies() -
         "unicodedata",
     }
     semantic_imports = {
+        "_validation_input.py": {"json"},
         "_semantic_candidates.py": {"structuraguard.profiling.pii"},
         "_semantic_prompt.py": {"structuraguard.llm", "structuraguard.llm._content"},
         "_semantic_validation.py": {
@@ -37,7 +38,11 @@ def test_mapper_imports_only_contracts_domain_and_explicit_pure_dependencies() -
         tree = ast.parse(source.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                assert all(a.name.split(".")[0] in pure for a in node.names)
+                assert all(
+                    a.name.split(".")[0] in pure
+                    or a.name in semantic_imports.get(source.name, set())
+                    for a in node.names
+                )
             elif isinstance(node, ast.ImportFrom) and node.level == 0:
                 module = node.module or ""
                 assert (

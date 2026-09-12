@@ -2,7 +2,7 @@
 
 from structuraguard.ports.database import DatabaseAdapter
 from structuraguard.ports.llm import LLMProvider
-from structuraguard.ports.mapping import CandidateMapper
+from structuraguard.ports.mapping import CandidateMapper, MappingPlanValidator
 from structuraguard.ports.parser import Parser
 from structuraguard.ports.profiling import NormalizedDataProfiler
 from structuraguard.ports.security import PIIClassifier, SecurityScanner
@@ -19,6 +19,7 @@ __all__ = (
     "CandidateMapper",
     "DatabaseAdapter",
     "LLMProvider",
+    "MappingPlanValidator",
     "NormalizedDataProfiler",
     "PIIClassifier",
     "ParsePlanExecutor",

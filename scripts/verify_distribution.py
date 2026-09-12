@@ -39,6 +39,15 @@ _SDIST_ROOT = f"{_DISTRIBUTION_NAME}-{_VERSION}"
 
 _PACKAGE_FILES = frozenset(
     {
+        "structuraguard/contracts/mapping_rules.py",
+        "structuraguard/contracts/mapping_validation.py",
+        "structuraguard/mapping/validation.py",
+        "structuraguard/mapping/_validation_identity.py",
+        "structuraguard/mapping/_validation_input.py",
+        "structuraguard/mapping/_validation_relations.py",
+        "structuraguard/mapping/_validation_report.py",
+        "structuraguard/mapping/_validation_scope.py",
+        "structuraguard/mapping/_validation_types.py",
         "structuraguard/contracts/semantic_mapping.py",
         "structuraguard/llm/_content.py",
         "structuraguard/mapping/_semantic_candidates.py",
@@ -197,6 +206,13 @@ _PUBLIC_EXPORTS = frozenset(
 )
 _CONTRACT_EXPORTS = frozenset(
     {
+        "MappingIdentity",
+        "MappingRelation",
+        "MappingIssueLocation",
+        "MappingValidationEvidence",
+        "MappingPlanInputReport",
+        "MappingValidationOptions",
+        "MappingValidationPolicy",
         "SemanticAssessment",
         "SemanticCandidateScore",
         "SemanticChoice",
@@ -427,6 +443,7 @@ _DOMAIN_EXPORTS = frozenset(
 )
 _PORT_EXPORTS = frozenset(
     {
+        "MappingPlanValidator",
         "CandidateMapper",
         "NormalizedDataProfiler",
         "PIIClassifier",
