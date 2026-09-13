@@ -34,6 +34,7 @@ async def _prepare(dsn: str, major: int) -> None:
         "CREATE SCHEMA forbidden",
         "CREATE ROLE inspector LOGIN PASSWORD 'inspection-canary-47'",
         "CREATE ROLE blocked LOGIN PASSWORD 'inspection-canary-47'",
+        "CREATE ROLE dry_writer LOGIN PASSWORD 'dry-writer-canary-77'",
         "GRANT USAGE ON SCHEMA app, ref TO inspector",
         "CREATE TYPE app.status AS ENUM ('new', 'done')",
         "CREATE TYPE ref.shared_enum AS ENUM ('shared')",
@@ -139,3 +140,23 @@ def pg_target(pg_dsn: str) -> PostgreSQLTarget:
             ("app", "item_summary"),
         ),
     )
+
+
+@pytest.fixture(scope="session")
+def stage_accounts(pg_dsn: str) -> None:
+    """Одна fixture definition для всех файлов staging suite."""
+
+    async def create() -> None:
+        engine = create_async_engine(pg_dsn, poolclass=NullPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.exec_driver_sql(
+                    "CREATE ROLE staging_writer LOGIN PASSWORD 'staging-test-47'"
+                )
+                await connection.exec_driver_sql(
+                    "CREATE ROLE staging_cleaner LOGIN PASSWORD 'staging-test-47'"
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(create())

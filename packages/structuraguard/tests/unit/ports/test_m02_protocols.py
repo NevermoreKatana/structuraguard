@@ -17,6 +17,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
 
 _PORT_EXPORTS = frozenset(
     {
+        "RunStagingStore",
         "ConstraintReader",
         "ProvenanceValidator",
         "JsonSchemaValidator",
@@ -136,6 +137,11 @@ def test_protocol_exports_are_explicit_and_minimal() -> None:
 
     assert frozenset(exports) == _PORT_EXPORTS
     assert len(exports) == len(set(exports))
+
+
+def test_legacy_stage_only_store_does_not_claim_run_lifecycle() -> None:
+    assert isinstance(_FakeStagingStore(), ports.StagingStore)
+    assert not isinstance(_FakeStagingStore(), ports.RunStagingStore)
 
 
 def test_parser_identity_contract_is_read_only() -> None:

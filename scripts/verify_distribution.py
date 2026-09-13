@@ -39,6 +39,32 @@ _SDIST_ROOT = f"{_DISTRIBUTION_NAME}-{_VERSION}"
 
 _PACKAGE_FILES = frozenset(
     {
+        "structuraguard/contracts/loading.py",
+        "structuraguard/database/writer_target.py",
+        "structuraguard/database/loader.py",
+        "structuraguard/database/_load_queries.py",
+        "structuraguard/database/_load_transaction.py",
+        "structuraguard/database/_load_ledger.py",
+        "structuraguard/database/_load_ledger_schema.py",
+        "structuraguard/database/ledger.py",
+        "structuraguard/loading/groups.py",
+        "structuraguard/loading/idempotency.py",
+        "structuraguard/loading/relations.py",
+        "structuraguard/loading/server_values.py",
+        "structuraguard/loading/staged_input.py",
+        "structuraguard/loading/__init__.py",
+        "structuraguard/loading/projection.py",
+        "structuraguard/loading/planning.py",
+        "structuraguard/database/dry_run.py",
+        "structuraguard/database/_dry_run_permissions.py",
+        "structuraguard/database/_dry_run_reader.py",
+        "structuraguard/contracts/staging.py",
+        "structuraguard/stores/__init__.py",
+        "structuraguard/stores/_core.py",
+        "structuraguard/stores/_postgresql_schema.py",
+        "structuraguard/stores/bootstrap.py",
+        "structuraguard/stores/memory.py",
+        "structuraguard/stores/postgresql.py",
         "structuraguard/contracts/provenance.py",
         "structuraguard/ports/provenance.py",
         "structuraguard/validation/provenance.py",
@@ -529,6 +555,7 @@ _DOMAIN_EXPORTS = frozenset(
 )
 _PORT_EXPORTS = frozenset(
     {
+        "RunStagingStore",
         "ProvenanceValidator",
         "ConstraintReader",
         "JsonSchemaValidator",

@@ -378,6 +378,10 @@ class LoadError(StructuraGuardError):
     """Ошибка staging или транзакционной загрузки."""
 
 
+class StagingError(LoadError):
+    """Безопасный отказ staging с machine-readable code без payload."""
+
+
 class OperationNotImplementedError(StructuraGuardError):
     """Ошибка вызова операции, которая ещё не поставляется в M1.
 
