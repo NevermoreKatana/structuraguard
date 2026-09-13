@@ -138,7 +138,11 @@ class Budget:
 
     def text(self, size: int, *, existing: int = 0) -> None:
         self.check("value_chars", existing + size, self.limits.max_value_chars)
-        self.check("text_chars", self.text_chars + size, self.limits.max_text_chars)
+        self.check(
+            "text_chars",
+            self.text_chars + size,
+            min(self.limits.max_text_chars, self.context.max_text_chars),
+        )
         self.text_chars += size
 
 

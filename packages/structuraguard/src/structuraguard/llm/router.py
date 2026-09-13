@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from structuraguard.contracts._base import canonical_sha256_value
 from structuraguard.contracts.common import DataClassification
+from structuraguard.contracts.injection import InjectionAction
 from structuraguard.contracts.llm import (
     LLMCallRecord,
     LLMErrorCode,
@@ -19,14 +20,17 @@ from structuraguard.contracts.reports import (
     LLMResponse,
     ProviderCapabilities,
 )
-from structuraguard.exceptions import LLMProviderError
+from structuraguard.contracts.security import Resource
+from structuraguard.exceptions import LLMProviderError, SecurityPolicyError
 from structuraguard.ports.llm import LLMProvider
+from structuraguard.ports.resources import LLMResourceGuard
 
 from ._boundary import (
     call_record,
     checked_capabilities,
     checked_generation,
     checked_request,
+    enforce_security_route,
 )
 
 
@@ -49,6 +53,12 @@ class PolicyAwareLLMRouter:
     policy/deployments дают ValueError/Pydantic ValidationError без сетевого I/O.
     Новый instance создаёт новый budget. Router не является LLMProvider и напрямую
     не подставляется вместо concrete provider в SemanticParsingSession.
+
+    resources — необязательный общий LLMResourceGuard нескольких adapters/run:
+    резервирует call и полный input/output allowance до каждой egress попытки.
+    Общая session не заменяет routing approval и не возвращает резерв при ошибке.
+    При вложенных wrappers host подключает guard к одному владельцу попытки,
+    иначе budget учитывается дважды. Сначала сузьте policy, затем выпускайте approval.
     """
 
     def __init__(
@@ -59,6 +69,7 @@ class PolicyAwareLLMRouter:
         run_id: str,
         clock: Callable[[], datetime] = _utc_now,
         monotonic: Callable[[], float] = time.monotonic,
+        resources: LLMResourceGuard | None = None,
     ) -> None:
         self._policy = LLMRoutingPolicy.model_validate(
             policy.model_dump(warnings="error")
@@ -87,6 +98,7 @@ class PolicyAwareLLMRouter:
         self._calls: list[LLMCallRecord] = []
         self._reserved_tokens = 0
         self._attempt_count = 0
+        self._resources = resources
 
     @property
     def policy(self) -> LLMRoutingPolicy:
@@ -109,9 +121,14 @@ class PolicyAwareLLMRouter:
         return self._reserved_tokens
 
     def _remaining_ms(self) -> int:
-        return self._policy.budget.max_time_ms - max(
+        remaining = self._policy.budget.max_time_ms - max(
             0, int((self._monotonic() - self._start) * 1000)
         )
+        if self._resources is not None:
+            remaining = min(
+                remaining, int(self._resources.llm_remaining_seconds() * 1000)
+            )
+        return remaining
 
     def _approved(self, request: LLMRequest) -> None:
         if (
@@ -127,6 +144,13 @@ class PolicyAwareLLMRouter:
             zip(self._policy.routes, self._caps, strict=True)
         ):
             environment = caps.execution_environment
+            injection = request.security_approval.report.injection
+            if caps.tool_calling or (
+                injection is not None
+                and injection.action is InjectionAction.LOCAL_ONLY
+                and environment is not LLMExecutionEnvironment.LOCAL
+            ):
+                continue
             if (
                 request.data_classification not in route.allowed_classifications
                 or environment
@@ -187,6 +211,8 @@ class PolicyAwareLLMRouter:
             or self._remaining_ms() <= 0
         ):
             raise LLMProviderError(LLMErrorCode.BUDGET_EXCEEDED)
+        if self._resources is not None:
+            self._resources.reserve_llm(reservation)
         self._attempt_count += 1
         self._reserved_tokens += reservation
         return reservation
@@ -248,6 +274,14 @@ class PolicyAwareLLMRouter:
         Cancellation распространяется как asyncio.CancelledError. Router выполняет
         I/O только через providers и не владеет их lifecycle.
         """
+        if self._resources is not None:
+            return await self._resources.call(
+                lambda: self._generate_structured(request),
+                resource=Resource.LLM_TIME_MS,
+            )
+        return await self._generate_structured(request)
+
+    async def _generate_structured(self, request: LLMRequest) -> LLMResponse:
         if self._policy.mode is LLMRoutingMode.NO_LLM:
             raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
         checked = checked_request(request)
@@ -265,6 +299,7 @@ class PolicyAwareLLMRouter:
                     checked_capabilities(provider.capabilities)
                 ) != canonical_sha256_value(caps):
                     raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
+                enforce_security_route(checked, caps)
                 reservation = self._reserve(caps)
                 result: LLMResponse | None = None
                 failure: LLMProviderError | None = None
@@ -280,6 +315,10 @@ class PolicyAwareLLMRouter:
                     return result
                 except TimeoutError:
                     failure = LLMProviderError(LLMErrorCode.BUDGET_EXCEEDED)
+                except SecurityPolicyError:
+                    result = None
+                    failure = LLMProviderError(LLMErrorCode.BUDGET_EXCEEDED)
+                    raise
                 except LLMProviderError as error:
                     # Чужой adapter не может протащить raw details/exception chain.
                     try:

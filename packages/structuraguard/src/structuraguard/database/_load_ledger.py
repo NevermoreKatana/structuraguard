@@ -163,11 +163,12 @@ class Ledger:
             rejected_records=result.rejected_records,
             generated_at=result.generated_at,
         )
+        audit_payload = (result.audit_head or audit).canonical_json()
         await connection.execute(
             insert(self._tables["execution_audit"]),
             {
                 **base,
-                "payload": audit.canonical_json(),
-                "fingerprint": canonical_sha256_value(audit.canonical_json()),
+                "payload": audit_payload,
+                "fingerprint": canonical_sha256_value(audit_payload),
             },
         )

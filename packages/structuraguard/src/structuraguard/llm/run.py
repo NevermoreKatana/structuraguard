@@ -11,14 +11,17 @@ from structuraguard.contracts.reports import (
     LLMResponse,
     ProviderCapabilities,
 )
+from structuraguard.contracts.security import Resource
 from structuraguard.exceptions import LLMProviderError
 from structuraguard.llm._boundary import (
     call_record,
     checked_capabilities,
     checked_generation,
     checked_request,
+    enforce_security_route,
 )
 from structuraguard.ports.llm import LLMProvider
+from structuraguard.ports.resources import LLMResourceGuard
 
 
 def utc_now() -> datetime:
@@ -27,7 +30,21 @@ def utc_now() -> datetime:
 
 
 class LLMRunProvider:
-    """Один provider, конечный run budget, без retry и изменения capability identity."""
+    """Один provider с конечным budget, без retry и изменения capability identity.
+
+    Args:
+        provider: Явный LLMProvider; wrapper не владеет его lifecycle.
+        budget: Локальные calls/tokens/time caps; создание начинает deadline.
+        clock: UTC часы для call metadata.
+        monotonic: Монотонные секунды для deadline.
+        resources: Необязательный общий LLMResourceGuard, только сужающий caps.
+
+    Constructor читает capabilities, не делает generation/network I/O.
+    Неверный budget даёт ValidationError; provider/request ошибки — LLMProviderError.
+    Общий guard может дать SecurityPolicyError. Резерв каждой попытки не возвращается
+    при ошибке/cancel. Restricted cloud и injection restrictions проверяются до
+    provider call. Wrapper не добавляет tools/DB/SQL capability.
+    """
 
     def __init__(
         self,
@@ -36,6 +53,7 @@ class LLMRunProvider:
         *,
         clock: Callable[[], datetime] = utc_now,
         monotonic: Callable[[], float] = time.monotonic,
+        resources: LLMResourceGuard | None = None,
     ) -> None:
         self._provider = provider
         self._caps = checked_capabilities(provider.capabilities)
@@ -45,6 +63,7 @@ class LLMRunProvider:
         self._reserved = 0
         self._calls: list[LLMCallRecord] = []
         self._busy = False
+        self._resources = resources
 
     @property
     def capabilities(self) -> ProviderCapabilities:
@@ -58,6 +77,14 @@ class LLMRunProvider:
 
     async def generate_structured(self, request: LLMRequest) -> LLMResponse:
         """Зарезервировать calls/tokens/deadline до provider invocation."""
+        if self._resources is not None:
+            return await self._resources.call(
+                lambda: self._generate_structured(request),
+                resource=Resource.LLM_TIME_MS,
+            )
+        return await self._generate_structured(request)
+
+    async def _generate_structured(self, request: LLMRequest) -> LLMResponse:
         checked = checked_request(request)
         caps = checked_capabilities(self._provider.capabilities)
         if caps != self._caps or self._busy:
@@ -68,6 +95,7 @@ class LLMRunProvider:
             or caps.context_window_tokens is None
         ):
             raise LLMProviderError(LLMErrorCode.CAPABILITY_MISMATCH)
+        enforce_security_route(checked, caps)
         allowance = caps.max_input_tokens + caps.max_output_tokens
         remaining = self._budget.max_time_ms / 1000 - (self._monotonic() - self._start)
         if (
@@ -77,6 +105,9 @@ class LLMRunProvider:
             or remaining <= 0
         ):
             raise LLMProviderError(LLMErrorCode.BUDGET_EXCEEDED)
+        if self._resources is not None:
+            remaining = min(remaining, self._resources.llm_remaining_seconds())
+            self._resources.reserve_llm(allowance)
         self._reserved += allowance
         self._busy = True
         started, tick = self._clock(), self._monotonic()

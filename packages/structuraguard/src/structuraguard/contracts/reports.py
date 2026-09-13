@@ -40,6 +40,7 @@ from .common import (
     _contains_credential_canary,
     _exact_data_classification_input,
 )
+from .injection import InjectionAction, InjectionReport
 from .llm import LLMCallRecord, LLMExecutionEnvironment, LLMPrompt
 from .parsing import ParsePlan
 from .semantic import SemanticConfidence
@@ -160,6 +161,7 @@ _LOAD_REPORT_STATUSES = frozenset(
 )
 _SECURITY_REPORT_STATUSES = frozenset(
     {
+        PipelineStatus.NEEDS_REVIEW,
         PipelineStatus.COMPLETED,
         PipelineStatus.COMPLETED_WITH_WARNINGS,
         PipelineStatus.REJECTED_SECURITY,
@@ -739,18 +741,37 @@ class SecurityReport(FrozenContract):
     routing_policy_fingerprint: FingerprintStr
     redaction_fingerprint: FingerprintStr
     producer: ProducerMetadata
-    decision: Literal["allowed", "blocked", "error"]
+    decision: Literal["allowed", "blocked", "review", "error"]
     status: PipelineStatus
     artifact_fingerprints: tuple[FingerprintStr, ...]
     scanned_items: NonNegativeInt = 0
     blocked_items: NonNegativeInt = 0
     prompt_injection_detected: StrictBool = False
+    injection: InjectionReport | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     issues: tuple[ValidationIssue, ...] = ()
     generated_at: UtcDateTime
 
     _exact_classification = field_validator("data_classification", mode="before")(
         _exact_data_classification_input
     )
+
+    def require_request_binding(self, request: SecurityScanRequest) -> None:
+        """Проверить lineage до любого allowed/review/blocked outcome; без raw errors."""
+        for name in (
+            "request_id",
+            "run_id",
+            "purpose",
+            "content_fingerprint",
+            "payload_fingerprint",
+            "data_classification",
+            "routing_policy_id",
+            "routing_policy_fingerprint",
+            "redaction_fingerprint",
+        ):
+            if getattr(self, name) != getattr(request, name):
+                raise ValueError("Security report относится к другому scan request")
 
     @model_validator(mode="after")
     def validate_security_counts(self) -> Self:
@@ -766,10 +787,30 @@ class SecurityReport(FrozenContract):
             raise ValueError("payload fingerprint отсутствует в artifact provenance")
         if self.blocked_items > self.scanned_items:
             raise ValueError("blocked item count exceeds scanned item count")
+        if self.injection is not None:
+            if self.injection.payload_fingerprint != self.payload_fingerprint:
+                raise ValueError("Injection evidence относится к другому payload")
+            if self.injection.signals and not self.prompt_injection_detected:
+                raise ValueError("Injection flag не соответствует evidence")
+            action = self.injection.action
+            if action is InjectionAction.BLOCK and self.decision not in {
+                "blocked",
+                "error",
+            }:
+                raise ValueError("Injection block нельзя превратить в approval")
+            if action is InjectionAction.NEEDS_REVIEW and self.decision not in {
+                "review",
+                "blocked",
+                "error",
+            }:
+                raise ValueError("Injection review нельзя превратить в approval")
         if self.decision == "allowed":
             if not self.scanned_items:
                 raise ValueError("allowed security report требует фактического scan")
-            if self.blocked_items or self.prompt_injection_detected:
+            if self.blocked_items or (
+                self.prompt_injection_detected
+                and (self.injection is None or not self.injection.signals)
+            ):
                 raise ValueError("allowed security report не может блокировать items")
             if _has_error_issue(self.issues):
                 raise ValueError("allowed security report не может содержать errors")
@@ -787,6 +828,15 @@ class SecurityReport(FrozenContract):
                 and not _has_warning_issue(self.issues)
             ):
                 raise ValueError("COMPLETED_WITH_WARNINGS requires warning evidence")
+        elif self.decision == "review":
+            if (
+                self.status is not PipelineStatus.NEEDS_REVIEW
+                or not self.issues
+                or not self.blocked_items
+            ):
+                raise ValueError(
+                    "Security review требует NEEDS_REVIEW и issues/blocked items"
+                )
         elif self.decision == "blocked":
             if not self.blocked_items or not self.issues:
                 raise ValueError("blocked security report требует blocked items/issues")
@@ -894,6 +944,11 @@ class AuditEvent(FrozenContract):
             and self.status is not PipelineStatus.REJECTED_SECURITY
         ):
             raise ValueError("blocked security report требует REJECTED_SECURITY event")
+        if (
+            self.security_report.decision == "review"
+            and self.status is not PipelineStatus.NEEDS_REVIEW
+        ):
+            raise ValueError("Security review требует NEEDS_REVIEW event")
         if self.security_report.decision == "error" and self.status not in {
             PipelineStatus.FAILED,
             PipelineStatus.CANCELLED,

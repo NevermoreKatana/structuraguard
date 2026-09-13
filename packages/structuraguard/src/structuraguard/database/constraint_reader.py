@@ -24,12 +24,14 @@ from structuraguard.contracts.database import (
 from structuraguard.contracts.record_validation import RecordValidationLimits
 from structuraguard.domain.database_fingerprint import verify_database_fingerprint
 from structuraguard.exceptions import DatabaseInspectionError
+from structuraguard.ports.resources import DatabaseResourceGuard
 from structuraguard.validation._rule_input import checked
 
 from . import _constraint_queries as key_queries
 from . import _postgresql_queries as metadata_queries
 from ._inspection import InspectionControl, failure, inspection_slot, run_inspection
 from ._postgresql_catalog import PostgreSQLReader, integer, reflect, string
+from ._resource_hooks import install_query_guard
 from .normalization import catalog_identifier
 from .postgresql import PostgreSQLDatabaseAdapter, _cleanup, _DriverConnection
 from .sqlite import _authorize, _resolve_foreign_keys, _SQLiteReader
@@ -44,7 +46,11 @@ class DatabaseConstraintReader:
 
     Args:
         target: Trusted endpoint с ограниченным DB principal и table allowlist.
+            Central security_policy дополнительно сужает schema/table/column scope;
+            неполный column scope запрещает всю таблицу до чтения definitions.
         policy: Отдельное разрешение читать конкретные key columns и budgets.
+        resources: Необязательный общий DatabaseResourceGuard. Сужает key batch/
+            query caps, учитывает statements и deadline; не выдаёт SELECT authority.
 
     Конструктор не выполняет I/O. Нет writer handle, SQL/path из requests,
     materialization строк или cache; каждый read закрывает отдельное соединение.
@@ -53,7 +59,11 @@ class DatabaseConstraintReader:
     """
 
     def __init__(
-        self, target: SQLiteTarget | PostgreSQLTarget, *, policy: ConstraintReadPolicy
+        self,
+        target: SQLiteTarget | PostgreSQLTarget,
+        *,
+        policy: ConstraintReadPolicy,
+        resources: DatabaseResourceGuard | None = None,
     ) -> None:
         if type(target) is SQLiteTarget:
             self._target: SQLiteTarget | PostgreSQLTarget = SQLiteTarget.model_validate(
@@ -71,6 +81,11 @@ class DatabaseConstraintReader:
             RecordValidationLimits(),
             code="DB_READER_POLICY_INVALID",
         )
+        self._resources = resources
+        if resources is not None:
+            from structuraguard.domain.resource_limits import constraint_policy
+
+            self._policy = constraint_policy(resources.limits, self._policy)
         self._active = threading.Lock()
         self._unavailable = False
 
@@ -88,6 +103,8 @@ class DatabaseConstraintReader:
 
         Raises:
             ValidationError: Невалидная форма request/catalog либо intake budget.
+            SecurityPolicyError: Central schema/table/column policy запретила scope;
+                catalog fingerprint и локальная policy не отменяют запрет.
             DatabaseInspectionError: Запрещённый scope, schema drift, отказ БД,
                 timeout или cleanup failure; частичный результат не возвращается.
 
@@ -96,6 +113,15 @@ class DatabaseConstraintReader:
         Cancellation распространяется после cleanup; snapshot не защищает будущую
         запись от TOCTOU. Полные requests/keys чувствительны и не подходят для logs.
         """
+        if self._resources is not None:
+            return await self._resources.call(
+                lambda: self._read(request, catalog=catalog)
+            )
+        return await self._read(request, catalog=catalog)
+
+    async def _read(
+        self, request: ConstraintReadRequest, *, catalog: DatabaseCatalog
+    ) -> ConstraintReadResult:
         request = checked(
             request,
             ConstraintReadRequest,
@@ -192,6 +218,10 @@ class DatabaseConstraintReader:
             )
         ):
             raise failure("TARGET_NOT_ALLOWED")
+        if isinstance(target, SQLiteTarget) and target.security_policy is not None:
+            from structuraguard.domain.database_policy import authorize_database_scope
+
+            authorize_database_scope(target.security_policy, allowed, dialect="sqlite")
 
     def _sqlite(
         self,
@@ -262,6 +292,7 @@ class DatabaseConstraintReader:
         )
         logger.propagate = False
         engine.logger = engine.pool.logger = logger
+        install_query_guard(engine, self._resources)
         code = "DB_CONSTRAINT_READ_FAILED"
         try:
             with engine.connect() as connection:
@@ -272,6 +303,8 @@ class DatabaseConstraintReader:
                     for n in target.include_tables
                     if n.lower() not in {d.lower() for d in target.deny_tables}
                 )
+                if target.security_policy is not None:
+                    metadata_reader.authorize_columns(target.security_policy, names)
                 tables = _resolve_foreign_keys(
                     tuple(metadata_reader.table(n) for n in names),
                     metadata_reader.references,
@@ -340,7 +373,7 @@ class DatabaseConstraintReader:
         except ImportError:
             raise failure("DATABASE_DEPENDENCY_UNAVAILABLE") from None
 
-        adapter = PostgreSQLDatabaseAdapter(target)
+        adapter = PostgreSQLDatabaseAdapter(target, resources=self._resources)
         names, schemas = adapter._scope(
             DatabaseInspectionRequest(
                 target_id=target.target_id,

@@ -4,6 +4,17 @@ StructuraGuard — встраиваемая Python-библиотека для �
 разнородных данных в существующие реляционные БД. Основной API асинхронный, а
 sync API предоставляется отдельной facade.
 
+## Security controls M14
+
+Доступны явные [общие resource limits и parser runner](resource-policy.md),
+[PII/secrets classification и redaction](privacy-redaction.md),
+[prompt-injection signals](prompt-injection.md), [DB policy и HMAC audit](security-controls.md).
+Копируемые примеры работают локально. Эти API подключает trusted host;
+полный lifecycle не собирается автоматически. OS sandbox backend, filesystem
+safe-open, export policy и performance baseline не поставлены. Полная приёмка
+M14 не подтверждена: [матрица](plans/M14_acceptance.md),
+[security review](plans/M14_security_review.md).
+
 ## PostgreSQL staging и loader M13
 
 Доступны отдельные [staging API с явным bootstrap](staging.md),

@@ -115,6 +115,7 @@ class JsonParserLimits:
     max_value_chars: int = 1_000_000
     max_number_chars: int = 4_096
     max_keys: int = 1_000_000
+    max_columns: int = 100_000
     max_nodes: int = 1_000_000
     max_array_items: int = 1_000_000
     max_batch_nodes: int = 10_000
@@ -131,6 +132,7 @@ class JsonParserLimits:
             ("max_value_chars", self.max_value_chars, _MAX_VALUE_CHARS),
             ("max_number_chars", self.max_number_chars, _MAX_NUMBER_CHARS),
             ("max_keys", self.max_keys, _MAX_KEYS),
+            ("max_columns", self.max_columns, 100_000),
             ("max_nodes", self.max_nodes, _MAX_NODES),
             ("max_array_items", self.max_array_items, _MAX_ARRAY_ITEMS),
             ("max_batch_nodes", self.max_batch_nodes, _MAX_BATCH_NODES),
@@ -264,6 +266,8 @@ class _SourceCharacters:
         self._reader = context.reader
         self._decoder = codecs.getincrementaldecoder("utf-8-sig")(errors="strict")
         self._byte_offset = 0
+        self._total_text_chars = 0
+        self._adapter_id = adapter_id
         self._decoded = ""
         self._decoded_offset = 0
         self._finalized = False
@@ -332,6 +336,13 @@ class _SourceCharacters:
             )
         except UnicodeDecodeError:
             raise encoding_error("decode_failed", encoding="utf-8") from None
+        if len(self._decoded) > self._context.max_text_chars - self._total_text_chars:
+            raise limit_error(
+                adapter_id=self._adapter_id,
+                resource="text_chars",
+                limit=self._context.max_text_chars,
+            )
+        self._total_text_chars += len(self._decoded)
         self._decoded_offset = 0
         if self._byte_offset == self._source.size_bytes:
             self._finalized = True
@@ -922,6 +933,12 @@ class _TreeParser:
             while True:
                 if token.kind is not _TokenKind.STRING or type(token.value) is not str:
                     raise _JsonSyntax("invalid_json", line_number=token.start.line)
+                if member_order >= self._budget.limits.max_columns:
+                    raise limit_error(
+                        adapter_id=self._budget.adapter_id,
+                        resource="columns",
+                        limit=self._budget.limits.max_columns,
+                    )
                 self._budget.claim_key()
                 key = token.value
                 separator = await self._lexer.next()
@@ -954,6 +971,12 @@ class _TreeParser:
                     raise _JsonSyntax(
                         "invalid_json",
                         line_number=delimiter.start.line,
+                    )
+                if member_order >= self._budget.limits.max_columns:
+                    raise limit_error(
+                        adapter_id=self._budget.adapter_id,
+                        resource="columns",
+                        limit=self._budget.limits.max_columns,
                     )
                 token = await self._lexer.next()
 

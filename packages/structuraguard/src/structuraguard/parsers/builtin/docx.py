@@ -40,10 +40,16 @@ class DocxParserLimits(DocumentParserLimits):
     max_blocks: int = 100000
     max_runs_per_paragraph: int = 10000
     max_table_cells: int = 100000
+    max_columns: int = 100000
 
     def __post_init__(self) -> None:
         DocumentParserLimits.__post_init__(self)
-        for name in ("max_blocks", "max_runs_per_paragraph", "max_table_cells"):
+        for name in (
+            "max_blocks",
+            "max_runs_per_paragraph",
+            "max_table_cells",
+            "max_columns",
+        ):
             value = getattr(self, name)
             if type(value) is not int or not 1 <= value <= 1000000:
                 raise ValueError(f"{name} вне диапазона 1..1000000")
@@ -158,6 +164,7 @@ class _Word:
             if any(child.tag not in {_NS + "trPr", _NS + "tc"} for child in row):
                 raise unsupported("word_row_element")
             for column_index, cell in enumerate(row.findall(_NS + "tc")):
+                self.budget.check("columns", column_index + 1, self.limits.max_columns)
                 self.cells += 1
                 self.budget.check(
                     "table_cells", self.cells, self.limits.max_table_cells

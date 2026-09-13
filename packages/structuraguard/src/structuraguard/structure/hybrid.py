@@ -659,7 +659,13 @@ class HybridStructureAnalyzer:
                 )
         # Fallback сохраняет причину и требует review; cloud/policy не обходятся.
         if base is not None and not any(
-            i.code in {LLMErrorCode.UNSAFE_CONTENT, LLMErrorCode.POLICY_DENIED}
+            i.code
+            in {
+                LLMErrorCode.UNSAFE_CONTENT,
+                LLMErrorCode.POLICY_DENIED,
+                LLMErrorCode.SECURITY_REVIEW_REQUIRED,
+                "SECURITY_INJECTION_REVIEW",
+            }
             for i in issues
         ):
             return await self._finalize(

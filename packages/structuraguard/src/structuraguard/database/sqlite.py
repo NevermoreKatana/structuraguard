@@ -36,9 +36,11 @@ from structuraguard.exceptions import (
     DatabaseInspectionError,
     OperationNotImplementedError,
 )
+from structuraguard.ports.resources import DatabaseResourceGuard
 
 from ._catalog import inspect_catalog
 from ._inspection import InspectionControl, failure, inspection_slot, run_inspection
+from ._resource_hooks import install_query_guard
 from ._sqlite_sql import (
     TableDefinition,
     index_definition,
@@ -52,6 +54,8 @@ from .target import SQLiteTarget
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
 
+    from structuraguard.contracts.database_policy import DatabasePolicy
+
 
 class SQLiteDatabaseAdapter:
     """Получать каталог существующей SQLite-БД через отдельное соединение для чтения.
@@ -59,6 +63,8 @@ class SQLiteDatabaseAdapter:
     Args:
         target: Доверенная конфигурация пути, allowlist/denylist и limits.
             При создании адаптера повторно проверяется и сохраняется локально.
+        resources: Необязательный общий guard для statements/deadline; не заменяет
+            read-only connection и SQLite authorizer. Без него caps только локальные.
 
     Raises:
         pydantic.ValidationError: Конфигурация target некорректна.
@@ -73,10 +79,13 @@ class SQLiteDatabaseAdapter:
         остаётся недоверенными данными и не подтверждает права writer.
     """
 
-    def __init__(self, target: SQLiteTarget) -> None:
+    def __init__(
+        self, target: SQLiteTarget, *, resources: DatabaseResourceGuard | None = None
+    ) -> None:
         self._target = SQLiteTarget.model_validate(target.model_dump())
         self._active = threading.Lock()
         self._unavailable = False
+        self._resources = resources
 
     async def inspect(self, request: DatabaseInspectionRequest) -> DatabaseCatalog:
         """Получить каталог с fingerprint и FK graph после закрытия соединения.
@@ -171,6 +180,13 @@ class SQLiteDatabaseAdapter:
         Side effects:
             Открывает файл только для чтения, не выбирает пользовательские строки.
         """
+        if self._resources is not None:
+            return await self._resources.call(lambda: self._read_metadata(request))
+        return await self._read_metadata(request)
+
+    async def _read_metadata(
+        self, request: DatabaseInspectionRequest
+    ) -> DatabaseMetadataSnapshot:
         try:
             checked = DatabaseInspectionRequest.model_validate(request.model_dump())
         except ValidationError:
@@ -200,6 +216,14 @@ class SQLiteDatabaseAdapter:
         )
         if not names or any(name.lower().startswith("sqlite_") for name in names):
             raise failure("TARGET_NOT_ALLOWED")
+        if target.security_policy is not None:
+            from structuraguard.domain.database_policy import authorize_database_scope
+
+            authorize_database_scope(
+                target.security_policy,
+                (("main", name) for name in names),
+                dialect="sqlite",
+            )
         if len(names) > target.limits.max_tables:
             raise failure("SECURITY_LIMIT_EXCEEDED")
         try:
@@ -262,10 +286,13 @@ class SQLiteDatabaseAdapter:
         logger.propagate = False
         engine.logger = logger
         engine.pool.logger = logger
+        install_query_guard(engine, self._resources)
         try:
             with engine.connect() as connection:
                 connection.exec_driver_sql("BEGIN")
                 reader = _SQLiteReader(connection, control)
+                if self._target.security_policy is not None:
+                    reader.authorize_columns(self._target.security_policy, names)
                 tables = tuple(reader.table(name) for name in names)
                 tables = _resolve_foreign_keys(tables, reader.references)
                 result = DatabaseMetadataSnapshot(
@@ -310,7 +337,8 @@ def _authorize(
     if action == sqlite3.SQLITE_READ:
         return (
             sqlite3.SQLITE_OK
-            if database == "main" and arg1 in {"sqlite_master", "sqlite_schema"}
+            if (database == "main" and arg1 in {"sqlite_master", "sqlite_schema"})
+            or (arg1 == "pragma_table_xinfo" and arg2 == "name")
             else sqlite3.SQLITE_DENY
         )
     if action == sqlite3.SQLITE_PRAGMA:
@@ -350,6 +378,24 @@ class _SQLiteReader:
         self.connection = connection
         self.control = control
         self.references: dict[str, tuple[_ForeignKey, ...]] = {}
+
+    def authorize_columns(self, policy: DatabasePolicy, names: Sequence[str]) -> None:
+        """Проверить свежий полный column scope до чтения definitions и user rows."""
+        from structuraguard.domain.database_policy import authorize_database
+
+        for name in names:
+            columns = self.rows(
+                "SELECT name FROM pragma_table_xinfo(?, 'main') LIMIT ?",
+                (name, self.control.limits.max_columns + 1),
+                limit=self.control.limits.max_columns,
+            )
+            authorize_database(
+                policy,
+                schema="main",
+                table=name,
+                columns=(_text(row[0]) for row in columns),
+                dialect="sqlite",
+            )
 
     def rows(
         self, sql: str, parameters: tuple[object, ...] = (), *, limit: int

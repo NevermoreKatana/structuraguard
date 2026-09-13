@@ -19,15 +19,18 @@ from structuraguard.contracts.database import (
 from structuraguard.contracts.mapping import ValidatedMappingPlan
 from structuraguard.contracts.normalized import NormalizedBatch
 from structuraguard.contracts.reports import LoadReport
+from structuraguard.domain.database_policy import authorize_database_scope
 from structuraguard.exceptions import (
     DatabaseInspectionError,
     OperationNotImplementedError,
 )
+from structuraguard.ports.resources import DatabaseResourceGuard
 
 from . import _postgresql_queries as queries
 from ._catalog import inspect_catalog
 from ._inspection import failure, inspection_slot
 from ._postgresql_catalog import PostgreSQLReader, integer, reflect, string
+from ._resource_hooks import install_query_guard
 from .target import PostgreSQLTarget
 
 if TYPE_CHECKING:
@@ -44,6 +47,9 @@ class PostgreSQLDatabaseAdapter:
     Args:
         target: Доверенный inspector DSN, точные schema/table selectors и limits.
             Конфигурация повторно валидируется; writer connection не принимается.
+        resources: Необязательный общий DatabaseResourceGuard; резервирует каждый
+            SDK statement до driver invocation и ограничивает общий deadline.
+            Target/fingerprint создавайте после сужения inspection_limits.
 
     Raises:
         pydantic.ValidationError: Некорректные поля target; проверка DSN/driver
@@ -59,12 +65,18 @@ class PostgreSQLDatabaseAdapter:
         Каталог не подтверждает права writer; DSN не входит в request/результат.
     """
 
-    def __init__(self, target: PostgreSQLTarget) -> None:
+    def __init__(
+        self,
+        target: PostgreSQLTarget,
+        *,
+        resources: DatabaseResourceGuard | None = None,
+    ) -> None:
         self._target = PostgreSQLTarget.model_validate(
             {**target.model_dump(), "dsn": target.dsn}
         )
         self._active = threading.Lock()
         self._unavailable = False
+        self._resources = resources
 
     async def inspect(self, request: DatabaseInspectionRequest) -> DatabaseCatalog:
         """Получить каталог с fingerprint и FK graph после cleanup соединения.
@@ -162,6 +174,13 @@ class PostgreSQLDatabaseAdapter:
             Read-only transaction читает pg_catalog; пользовательские rows,
             views и metadata expressions не исполняются.
         """
+        if self._resources is not None:
+            return await self._resources.call(lambda: self._read_metadata(request))
+        return await self._read_metadata(request)
+
+    async def _read_metadata(
+        self, request: DatabaseInspectionRequest
+    ) -> DatabaseMetadataSnapshot:
         names, schemas = self._scope(request)
         return await self._inspect(names, schemas)
 
@@ -196,6 +215,10 @@ class PostgreSQLDatabaseAdapter:
         )
         if not names:
             raise failure("TARGET_NOT_ALLOWED")
+        if target.security_policy is not None:
+            authorize_database_scope(
+                target.security_policy, names, dialect="postgresql"
+            )
         if len(names) > target.limits.max_tables:
             raise failure("SECURITY_LIMIT_EXCEEDED")
         return names, frozenset(selected)
@@ -220,6 +243,11 @@ class PostgreSQLDatabaseAdapter:
         ):
             raise failure("DATABASE_TARGET_INVALID")
         limits = target.limits
+        if (
+            target.security_policy is not None
+            and url.username != target.security_policy.inspector_principal
+        ):
+            raise failure("DATABASE_PERMISSION_DENIED")
         # Startup settings защищают также bootstrap-запросы SQLAlchemy.
         settings = {
             "default_transaction_read_only": "on",
@@ -255,6 +283,7 @@ class PostgreSQLDatabaseAdapter:
         quiet.propagate = False
         engine.sync_engine.logger = quiet
         engine.sync_engine.pool.logger = quiet
+        install_query_guard(engine.sync_engine, self._resources)
         return engine
 
     async def _inspect(
@@ -290,6 +319,14 @@ class PostgreSQLDatabaseAdapter:
                 if not 150000 <= integer(status, "version") < 190000:
                     raise failure("DATABASE_METADATA_UNSUPPORTED")
                 reader.server_version = integer(status, "version")
+                if self._target.security_policy is not None:
+                    from ._dry_run_permissions import principal
+
+                    policy = self._target.security_policy
+                    await principal(
+                        connection, policy.inspector_principal, session_mode="writer"
+                    )
+                    await principal(connection, policy.writer_principal)
                 result = await reflect(reader, names)
                 if (
                     len(result.model_dump_json().encode("utf-8"))

@@ -4,7 +4,13 @@ import asyncio
 from datetime import datetime, timedelta
 
 from structuraguard.contracts._base import canonical_sha256_value
-from structuraguard.contracts.llm import LLMCallRecord, LLMErrorCode
+from structuraguard.contracts.common import DataClassification
+from structuraguard.contracts.injection import InjectionAction
+from structuraguard.contracts.llm import (
+    LLMCallRecord,
+    LLMErrorCode,
+    LLMExecutionEnvironment,
+)
 from structuraguard.contracts.reports import (
     LLMRequest,
     LLMResponse,
@@ -26,6 +32,7 @@ def sanitized_provider_error(error: LLMProviderError) -> LLMProviderError:
 async def checked_generation(provider: LLMProvider, request: LLMRequest) -> LLMResponse:
     """Локализовать внешнюю generation: exception text может содержать source/secrets."""
     try:
+        enforce_security_route(request, checked_capabilities(provider.capabilities))
         return await provider.generate_structured(request)
     except LLMProviderError as error:
         raise sanitized_provider_error(error) from None
@@ -49,6 +56,25 @@ def checked_request(request: LLMRequest) -> LLMRequest:
     if result.prompt is None:
         raise LLMProviderError(LLMErrorCode.REQUEST_INVALID)
     return result
+
+
+def enforce_security_route(request: LLMRequest, caps: ProviderCapabilities) -> None:
+    """Evidence может только сузить route; оно не включает tools или иной authority."""
+    injection = request.security_approval.report.injection
+    if (
+        caps.execution_environment
+        not in {LLMExecutionEnvironment.LOCAL, LLMExecutionEnvironment.CLOUD}
+        or caps.tool_calling
+        or (
+            request.data_classification is DataClassification.RESTRICTED
+            and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+        )
+    ) or (
+        injection is not None
+        and injection.action is InjectionAction.LOCAL_ONLY
+        and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+    ):
+        raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
 
 
 def checked_capabilities(caps: ProviderCapabilities) -> ProviderCapabilities:

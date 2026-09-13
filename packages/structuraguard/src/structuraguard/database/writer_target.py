@@ -60,6 +60,13 @@ def writer_scope(target: PostgreSQLWriterTarget) -> PostgreSQLTarget:
     try:
         write = make_url(target.dsn.get_secret_value())
         read = make_url(target.inspection.dsn.get_secret_value())
+        policy = target.inspection.security_policy
+        if policy is not None and (
+            read.username != policy.inspector_principal
+            or write.username != policy.writer_principal
+            or target.principal != policy.writer_principal
+        ):
+            raise failure("LOAD_WRITER_TARGET_INVALID")
         if (
             any(
                 u.drivername != "postgresql+asyncpg"

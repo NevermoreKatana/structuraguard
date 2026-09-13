@@ -1,0 +1,14 @@
+[
+  {"text":"order 1234567890","category":"phone","detected":true,"kind":"false_positive","reason":"Broad phone может принять номер заказа."},
+  {"text":"ID 1234567890","category":"inn","detected":true,"kind":"false_positive","reason":"По умолчанию ИНН проверяется по форме, без принадлежности и checksum."},
+  {"text":"part 123-456-789 00","category":"snils","detected":true,"kind":"false_positive","reason":"Формат серийного номера совпадает со СНИЛС; checksum не проверяется."},
+  {"text":"part 45 12 345678","category":"passport","detected":true,"kind":"false_positive","reason":"Похожий код детали, без проверки документа/органа выдачи."},
+  {"text":"reference 4111111111111111","category":"card","detected":true,"kind":"false_positive","reason":"Luhn проходит у тестового номера; это не проверка существования карты."},
+  {"text":"alice [at] example [dot] test","category":"email","detected":false,"kind":"false_negative","reason":"Обфускация email не нормализуется."},
+  {"text":"alice＠example.test","category":"email","detected":false,"kind":"false_negative","reason":"Unicode homoglyph вместо ASCII @."},
+  {"text":"ИНН 12345​67890","category":"inn","detected":false,"kind":"false_negative","reason":"Zero-width separator внутри цифр не удаляется."},
+  {"text":"QZXVPLMNabcdef0123456789","category":"token","detected":false,"kind":"false_negative","reason":"Bare token неизвестного формата без label/prefix."},
+  {"text":"４１１１１１１１１１１１１１１１","category":"card","detected":false,"kind":"false_negative","reason":"Card recognizer намеренно принимает только ASCII digits."},
+  {"text":"4111111111111112","category":"card","detected":false,"kind":"negative","reason":"Ошибка Luhn; поле с явным card label всё равно требует masking."},
+  {"text":"0000000000000000","category":"card","detected":false,"kind":"negative","reason":"Однородные значения не считаются card evidence."}
+]

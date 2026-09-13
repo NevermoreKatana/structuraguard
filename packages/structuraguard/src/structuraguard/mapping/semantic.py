@@ -152,8 +152,9 @@ class LLMSemanticMapper:
         try:
             bounded_size(report, 65536)
             checked = SecurityReport.model_validate(report.model_dump(warnings="error"))
-            if checked.request_id != scan.request_id:
-                raise ValueError("Security report относится к другому scan request")
+            checked.require_request_binding(scan)
+            if checked.decision == "review":
+                raise LLMProviderError(LLMErrorCode.SECURITY_REVIEW_REQUIRED)
             approval = SecurityApproval(
                 report=checked, report_fingerprint=canonical_sha256_value(checked)
             )
@@ -254,7 +255,25 @@ class LLMSemanticMapper:
                 ),
             )
             check_deadline(deadline)
-            request = await self._approved_request(scan)
+            try:
+                request = await self._approved_request(scan)
+            except LLMProviderError as error:
+                if error.error_code != LLMErrorCode.SECURITY_REVIEW_REQUIRED:
+                    raise
+                groups.append(
+                    SemanticGroupResult(
+                        candidates=group,
+                        decision=None,
+                        choices=(),
+                        confidence=Decimal(0),
+                        ambiguous=True,
+                        reasons=("SECURITY_INJECTION_REVIEW",),
+                        prompt=semantic_mapping_prompt().identity,
+                        calls=(),
+                        action="confirm",
+                    )
+                )
+                continue
             start = len(self._router.calls)
             check_deadline(deadline)
             response = await self._router.generate_structured(request)

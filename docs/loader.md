@@ -353,3 +353,13 @@ large-input execution отсутствуют. Даже standalone DB-generated P
 [spec-users]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#203-разделение-db-users
 [spec-ddl]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#204-запрет-ddl
 [spec-m13]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m13-staging-and-loader
+
+## Signed audit M14
+
+`PostgreSQLLoadPolicy.audit` вместе с `PostgreSQLLoader(audit_signer=...)`
+включают HMAC chain и durable delivery intent в target transaction, независимо
+от idempotency. Receipt получает `audit_head`; ledger хранит reference и replay
+проверяет подписанный prefix. Legacy unsigned receipts не переписываются.
+После rollback отдельный terminal audit может завершиться с явным `audit_gap`.
+Bootstrap, grants, migration/compatibility и ограничения доставки описаны в
+[руководстве M14](security-controls.md#postgresql-transaction).

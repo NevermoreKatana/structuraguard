@@ -25,6 +25,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+security = ["cryptography>=46,<51"]
 sqlite = ["SQLAlchemy>=2.0.40,<3"]
 xml = ["defusedxml>=0.7.1,<1"]
 yaml = ["PyYAML>=6.0.3,<7"]
@@ -57,6 +58,7 @@ tika = [
     "defusedxml>=0.7.1,<1",
 ]
 all = [
+    "cryptography>=46,<51",
     "defusedxml>=0.7.1,<1",
     "PyYAML>=6.0.3,<7",
     "SQLAlchemy>=2.0.40,<3",

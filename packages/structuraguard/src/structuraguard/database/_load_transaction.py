@@ -22,6 +22,14 @@ from structuraguard.loading.groups import dependency_groups
 from structuraguard.loading.planning import build_plan
 from structuraguard.loading.projection import Prepared, failure
 from structuraguard.loading.server_values import allowed_server_values
+from structuraguard.ports.audit import AuditSigner
+from structuraguard.ports.resources import DatabaseResourceGuard
+from structuraguard.security.audit import AuditChain
+from structuraguard.security.events import (
+    committed_load_event,
+    failed_load_event,
+    load_chain_identity,
+)
 
 from . import _postgresql_queries as queries
 from ._catalog import inspect_catalog
@@ -30,6 +38,8 @@ from ._dry_run_reader import SnapshotReader
 from ._load_ledger import Ledger
 from ._load_queries import statements
 from ._postgresql_catalog import PostgreSQLReader, integer, reflect, string
+from ._resource_hooks import install_query_guard
+from .audit import PostgreSQLAuditChainStore, append_rollback_event
 from .postgresql import (
     PostgreSQLDatabaseAdapter,
     _cleanup,
@@ -51,6 +61,7 @@ class Outcome:
     cancelled: bool
     warnings: tuple[str, ...] = ()
     result: PostgreSQLLoadResult | None = None
+    audit_gap: bool = False
 
 
 def sql_error(error: BaseException) -> str:
@@ -189,6 +200,8 @@ async def execute_transaction(
     claim_staging: Callable[[], Awaitable[StagingRun]],
     check_deadline: Callable[[], None],
     timeout_seconds: float,
+    resources: DatabaseResourceGuard | None = None,
+    audit_signer: AuditSigner | None = None,
 ) -> Outcome:
     try:
         from asyncpg.exceptions import PostgresError
@@ -203,8 +216,10 @@ async def execute_transaction(
     plan: DryRunExecutionPlan | None = None
     receipt: PostgreSQLLoadResult | None = None
     commit_started = committed = cancelled = False
+    replay_unverified = False
     code: str | None = None
     warnings: tuple[str, ...] = ()
+    audit_chain: AuditChain | None = None
     try:
         async with asyncio.timeout(timeout_seconds):
             mapping = prepared.request.mapping
@@ -220,10 +235,29 @@ async def execute_transaction(
             ):
                 raise failure("TARGET_NOT_ALLOWED")
             engine = writer_engine(target)
+            install_query_guard(engine.sync_engine, resources)
             connection = await engine.connect()
             raw = await connection.get_raw_connection()
             driver = cast(_DriverConnection, raw.driver_connection)
             await connection.begin()
+            if policy.audit is not None:
+                if audit_signer is None:
+                    raise failure("AUDIT_DURABILITY_REQUIRED")
+                audit_store = PostgreSQLAuditChainStore(connection, policy.audit)
+                await audit_store.prepare()
+                chain_id, run_id = load_chain_identity(
+                    policy.audit, request.staging_context.run_id
+                )
+                audit_chain = AuditChain(
+                    chain_id=chain_id,
+                    run_id=run_id,
+                    key_id=policy.audit.key_id,
+                    policy_fingerprint=canonical_sha256_value(policy.canonical_json()),
+                    signer=audit_signer,
+                    store=audit_store,
+                    max_events=policy.audit.max_events,
+                )
+                await audit_chain.check_key()
             state = (
                 await PostgreSQLReader(connection, target, schemas).rows(
                     queries.STATE, {}, 1
@@ -243,6 +277,26 @@ async def execute_transaction(
                 )
                 receipt = await ledger.claim(connection)
             if receipt is not None:
+                # Marker доказывает прошлый COMMIT даже при отказе audit verifier.
+                committed = True
+                replay_unverified = policy.audit is not None
+                if policy.audit is not None and audit_signer is not None:
+                    if receipt.audit_head is None:
+                        raise failure("AUDIT_CHAIN_INVALID")
+                    original_chain, original_run = load_chain_identity(
+                        policy.audit, receipt.run_id
+                    )
+                    original_audit = AuditChain(
+                        chain_id=original_chain,
+                        run_id=original_run,
+                        key_id=policy.audit.key_id,
+                        policy_fingerprint=receipt.policy_fingerprint,
+                        signer=audit_signer,
+                        store=audit_store,
+                        max_events=policy.audit.max_events,
+                    )
+                    await original_audit.verify_through(receipt.audit_head)
+                    replay_unverified = False
                 # Marker доказывает прошлый COMMIT; текущая transaction ничего не пишет.
                 committed = True
             else:
@@ -331,6 +385,11 @@ async def execute_transaction(
                     generated_at=started_at,
                     warnings=("LOAD_QUARANTINED",) if plan.planned_quarantine else (),
                 )
+                if audit_chain is not None and policy.audit is not None:
+                    envelope = await audit_chain.append(
+                        committed_load_event(policy.audit, request, receipt)
+                    )
+                    receipt = receipt.model_copy(update={"audit_head": envelope.head})
                 if ledger is not None:
                     await ledger.commit(connection, receipt, plan)
                 await permissions(
@@ -350,6 +409,8 @@ async def execute_transaction(
                     mapping.database_fingerprint,
                 )
                 check_deadline()
+                if resources is not None:
+                    resources.check_deadline()
                 commit_started = True
                 await connection.commit()
                 committed = True
@@ -369,6 +430,14 @@ async def execute_transaction(
         )
         cancelled = cancelled or cleanup_cancelled
     if committed:
+        if replay_unverified:
+            return Outcome(
+                StagingRunStatus.COMMITTED,
+                None,
+                "AUDIT_COMMITTED_UNVERIFIED",
+                False,
+                result=receipt,
+            )
         if not cleanup_ok:
             warnings += ("LOAD_POST_COMMIT_CLEANUP_FAILED",)
         if cancelled:
@@ -378,9 +447,28 @@ async def execute_transaction(
         return Outcome(
             StagingRunStatus.UNKNOWN, None, "LOAD_OUTCOME_UNKNOWN", cancelled
         )
+    audit_gap = False
+    if policy.audit is not None and audit_signer is not None:
+        terminal = failed_load_event(
+            policy.audit,
+            request,
+            occurred_at=started_at,
+            policy_fingerprint=canonical_sha256_value(policy.canonical_json()),
+            cancelled=cancelled,
+        )
+        audit_gap = not await append_rollback_event(
+            target,
+            policy.audit,
+            audit_signer,
+            terminal,
+            run_id=request.staging_context.run_id,
+        )
+        caller = asyncio.current_task()
+        cancelled = cancelled or (caller is not None and bool(caller.cancelling()))
     return Outcome(
         StagingRunStatus.CANCELLED if cancelled else StagingRunStatus.ROLLED_BACK,
         None,
         code or "LOAD_DATABASE_FAILED",
         cancelled,
+        audit_gap=audit_gap,
     )

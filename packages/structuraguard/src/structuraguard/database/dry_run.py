@@ -15,6 +15,7 @@ from structuraguard.contracts.loading import (
 from structuraguard.exceptions import StructuraGuardError
 from structuraguard.loading.planning import build_plan
 from structuraguard.loading.projection import Prepared, checked, failure, prepare
+from structuraguard.ports.resources import DatabaseResourceGuard
 
 from . import _postgresql_queries as queries
 from ._catalog import inspect_catalog
@@ -40,6 +41,8 @@ class PostgreSQLDryRunPlanner:
     Args:
         target: Trusted inspector endpoint, exact table scope и конечные budgets.
         policy: Отдельный writer login для проверки grants, M11 и SELECT allowlist.
+        resources: Необязательный общий guard для query/key batch/deadline caps.
+            Dry-run расходует budget, но не записывает staging/audit/target rows.
 
     Raises:
         DatabaseInspectionError: Неверная конфигурация inspector.
@@ -49,10 +52,27 @@ class PostgreSQLDryRunPlanner:
     от caller не принимаются. Один экземпляр обслуживает один активный вызов.
     """
 
-    def __init__(self, target: PostgreSQLTarget, *, policy: DryRunPolicy) -> None:
-        self._adapter = PostgreSQLDatabaseAdapter(target)
+    def __init__(
+        self,
+        target: PostgreSQLTarget,
+        *,
+        policy: DryRunPolicy,
+        resources: DatabaseResourceGuard | None = None,
+    ) -> None:
+        self._adapter = PostgreSQLDatabaseAdapter(target, resources=resources)
+        self._resources = resources
         self._target = self._adapter._target
         self._policy = checked(policy, DryRunPolicy, 4194304)
+        if resources is not None:
+            from structuraguard.domain.resource_limits import constraint_policy
+
+            self._policy = self._policy.model_copy(
+                update={
+                    "read_policy": constraint_policy(
+                        resources.limits, self._policy.read_policy
+                    )
+                }
+            )
         self._active = threading.Lock()
         self._unavailable = False
 
@@ -78,6 +98,11 @@ class PostgreSQLDryRunPlanner:
         DML, nextval, DDL и audit append не выполняются. Сбой cleanup блокирует
         повторное использование экземпляра; для logs используйте safe_summary().
         """
+        if self._resources is not None:
+            return await self._resources.call(lambda: self._plan_request(request))
+        return await self._plan_request(request)
+
+    async def _plan_request(self, request: DryRunRequest) -> DryRunExecutionPlan:
         with inspection_slot(self._active, unavailable=self._unavailable):
             try:
                 async with asyncio.timeout(self._target.limits.timeout_seconds):

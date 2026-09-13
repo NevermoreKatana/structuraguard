@@ -113,7 +113,8 @@ class ParseContext:
     """Runtime-контекст technical parsing с конечными resource limits.
 
     ``reader`` читает неизменяемый snapshot с тем же ``source_fingerprint``.
-    ``max_bytes``, ``max_records`` и ``max_nesting_depth`` задают общие бюджеты;
+    ``max_bytes``, ``max_records``, ``max_text_chars`` и ``max_nesting_depth``
+    задают общие бюджеты; SecuritySession компилирует ``max_columns`` в parser;
     более строгие format-specific limits adapter продолжают действовать.
     ``max_physical_objects`` ограничивает физические объекты, не бизнес-записи.
     ``batch_options`` задаёт целевой размер и максимальное число batches.
@@ -135,6 +136,8 @@ class ParseContext:
     batch_options: BatchOptions = field(default_factory=BatchOptions)
     max_physical_objects: int = 2_000_000
     detected_encoding: str | None = None
+    max_text_chars: int = 100_000_000
+    max_columns: int = 100_000
 
     def __post_init__(self) -> None:
         _validate_fingerprint(self.source_fingerprint)
@@ -151,3 +154,5 @@ class ParseContext:
             maximum=_MAX_PHYSICAL_OBJECTS,
         )
         _validate_encoding_name(self.detected_encoding)
+        _validate_positive_int(self.max_text_chars, field="max_text_chars")
+        _validate_positive_int(self.max_columns, field="max_columns")
