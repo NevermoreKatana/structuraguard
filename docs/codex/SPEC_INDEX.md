@@ -26,6 +26,9 @@
 | Demo application | 2, 23, 28, M13 |
 | Evaluation | 30–33, M14 |
 
+M15 SDK orchestrator: §6, §7, §23, §24, §25 и §33.
+См. [план](../plans/M15_sdk_orchestrator.md) и [API](../sdk-orchestrator.md).
+
 ## Команды
 
 ```bash
