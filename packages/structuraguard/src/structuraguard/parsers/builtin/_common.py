@@ -723,6 +723,7 @@ async def iter_physical_lines(
     awaiting_cr = False
     offset = 0
     chunk = initial
+    total_text_chars = 0
 
     while True:
         offset += len(chunk)
@@ -736,6 +737,13 @@ async def iter_physical_lines(
             ) from None
         if "\x00" in decoded:
             raise _parser_error("binary_content")
+        if len(decoded) > context.max_text_chars - total_text_chars:
+            raise limit_error(
+                adapter_id=adapter_id,
+                resource="text_chars",
+                limit=context.max_text_chars,
+            )
+        total_text_chars += len(decoded)
 
         position = 0
         if awaiting_cr and decoded:

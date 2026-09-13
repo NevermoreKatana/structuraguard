@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Self, cast
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 from pydantic.config import ExtraValues
@@ -17,6 +18,7 @@ from pydantic_core import InitErrorDetails
 type CanonicalScalar = str | int | float | bool | None
 type CanonicalValue = (
     CanonicalScalar
+    | UUID
     | Decimal
     | date
     | datetime
@@ -188,6 +190,8 @@ def _canonical_data(
         return _canonical_data(dumped)
     if isinstance(value, Decimal):
         return _canonical_decimal(value)
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, float) and value == 0:
         return 0.0
     if isinstance(value, datetime):

@@ -62,6 +62,9 @@ async def approved_request(
         raise LLMProviderError(LLMErrorCode.POLICY_DENIED) from None
     try:
         report = SecurityReport.model_validate(report.model_dump(warnings="error"))
+        report.require_request_binding(scan)
+        if report.decision == "review":
+            raise LLMProviderError(LLMErrorCode.SECURITY_REVIEW_REQUIRED)
         return LLMRequest(
             request_id="semantic_" + fingerprint[-24:],
             run_id=context.run_id,

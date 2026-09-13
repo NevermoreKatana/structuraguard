@@ -62,9 +62,20 @@ def layout_fingerprint(schema: str) -> str:
 
 async def check_schema(connection: AsyncConnection, schema: str) -> None:
     """Lock фиксированных таблиц, полная shape/PK/runtime проверка и version."""
+    await check_layout(
+        connection, schema, tables(schema)[1], layout_fingerprint(schema)
+    )
+
+
+async def check_layout(
+    connection: AsyncConnection,
+    schema: str,
+    expected: dict[str, Table],
+    fingerprint: str,
+) -> None:
+    """Общий guard фиксированных append-only ledger/audit layouts без runtime DDL."""
     from sqlalchemy import Integer, func, select, text
 
-    _, expected = tables(schema)
     quote = connection.dialect.identifier_preparer.quote_identifier
     for name in sorted(expected):
         await connection.exec_driver_sql(
@@ -159,15 +170,17 @@ async def check_schema(connection: AsyncConnection, schema: str) -> None:
             select(info.c.version, func.left(info.c.fingerprint, 72)).limit(2)
         )
     ).all()
-    if len(version) != 1 or tuple(version[0]) != (1, layout_fingerprint(schema)):
+    if len(version) != 1 or tuple(version[0]) != (1, fingerprint):
         raise failure("LOAD_LEDGER_SCHEMA_INVALID")
 
 
-async def grants(connection: AsyncConnection, schema: str) -> None:
+async def grants(
+    connection: AsyncConnection, schema: str, *, names: tuple[str, ...] | None = None
+) -> None:
     from sqlalchemy import text
 
     quote = connection.dialect.identifier_preparer.quote_identifier
-    for name in tables(schema)[1]:
+    for name in names if names is not None else tables(schema)[1]:
         row = (
             await connection.execute(
                 text("""

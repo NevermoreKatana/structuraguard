@@ -296,6 +296,9 @@ class LLMStructureAnalyzer:
             raise LLMProviderError(LLMErrorCode.POLICY_DENIED) from None
         try:
             report = SecurityReport.model_validate(report.model_dump(warnings="error"))
+            report.require_request_binding(scan)
+            if report.decision == "review":
+                raise LLMProviderError(LLMErrorCode.SECURITY_REVIEW_REQUIRED)
             approval = SecurityApproval(
                 report=report, report_fingerprint=canonical_sha256_value(report)
             )
@@ -371,7 +374,12 @@ class LLMStructureAnalyzer:
     ) -> StructureAnalysisResult:
         catalog = await prepare_samples(request, replay, self.policy)
         _check_deadline(deadline)
-        llm_request = await self._request(request, catalog)
+        try:
+            llm_request = await self._request(request, catalog)
+        except LLMProviderError as error:
+            if error.error_code != LLMErrorCode.SECURITY_REVIEW_REQUIRED:
+                raise
+            return _review(request.profile, catalog, "SECURITY_INJECTION_REVIEW")
         self._check_provider(llm_request)
         _check_deadline(deadline)
         response = await checked_generation(self._provider, llm_request)

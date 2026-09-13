@@ -12,6 +12,7 @@ members = ["packages/structuraguard"]
 
 [dependency-groups]
 dev = [
+    "cryptography>=46,<51",
     "SQLAlchemy[asyncio]>=2.0.40,<3",
     "asyncpg>=0.30,<1",
     "testcontainers[postgres]>=4.15,<5",

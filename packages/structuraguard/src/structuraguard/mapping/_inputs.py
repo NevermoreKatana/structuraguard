@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
@@ -72,7 +73,9 @@ def bounded_size(value: object, cap: int) -> int:
                     stack.extend(((key, depth + 1), (val, depth + 1)))
             else:
                 stack.extend((child, depth + 1) for child in item)
-        elif item is not None and not isinstance(item, bool | float | date | datetime):
+        elif item is not None and not isinstance(
+            item, bool | float | date | datetime | UUID
+        ):
             raise failure("MAPPING_INPUT_INVALID")
         if size > cap:
             raise failure("MAPPING_LIMIT_EXCEEDED", "input_bytes")

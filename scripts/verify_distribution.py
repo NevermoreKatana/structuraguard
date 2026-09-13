@@ -39,6 +39,41 @@ _SDIST_ROOT = f"{_DISTRIBUTION_NAME}-{_VERSION}"
 
 _PACKAGE_FILES = frozenset(
     {
+        "structuraguard/contracts/audit.py",
+        "structuraguard/contracts/database_policy.py",
+        "structuraguard/contracts/sandbox.py",
+        "structuraguard/domain/database_policy.py",
+        "structuraguard/ports/audit.py",
+        "structuraguard/ports/sandbox.py",
+        "structuraguard/security/audit.py",
+        "structuraguard/security/audit_store.py",
+        "structuraguard/security/database.py",
+        "structuraguard/security/events.py",
+        "structuraguard/database/audit.py",
+        "structuraguard/parsers/runners.py",
+        "structuraguard/contracts/security.py",
+        "structuraguard/contracts/privacy.py",
+        "structuraguard/contracts/injection.py",
+        "structuraguard/domain/llm_content.py",
+        "structuraguard/security/_signal_patterns.py",
+        "structuraguard/security/signals.py",
+        "structuraguard/security/scanner.py",
+        "structuraguard/domain/bounded_regex.py",
+        "structuraguard/domain/pii_patterns.py",
+        "structuraguard/ports/privacy.py",
+        "structuraguard/security/_privacy.py",
+        "structuraguard/security/patterns.py",
+        "structuraguard/security/classification.py",
+        "structuraguard/security/placeholder_store.py",
+        "structuraguard/security/redaction.py",
+        "structuraguard/domain/resource_limits.py",
+        "structuraguard/ports/resources.py",
+        "structuraguard/database/_resource_hooks.py",
+        "structuraguard/security/__init__.py",
+        "structuraguard/security/session.py",
+        "structuraguard/security/source.py",
+        "structuraguard/security/parsers.py",
+        "structuraguard/security/compilation.py",
         "structuraguard/contracts/loading.py",
         "structuraguard/database/writer_target.py",
         "structuraguard/database/loader.py",
@@ -644,6 +679,7 @@ _BUILTIN_PARSER_EXPORTS = frozenset(
     }
 )
 _OPTIONAL_DEPENDENCIES = {
+    "security": frozenset({"cryptography"}),
     "sqlite": frozenset({"sqlalchemy"}),
     "xml": frozenset({"defusedxml"}),
     "yaml": frozenset({"pyyaml"}),
@@ -672,6 +708,7 @@ _FORBIDDEN_DEPENDENCIES = frozenset(
 )
 _FORBIDDEN_OPTIONAL_IMPORTS = frozenset(
     {
+        "cryptography",
         "httpx",
         "httpcore",
         "defusedxml",

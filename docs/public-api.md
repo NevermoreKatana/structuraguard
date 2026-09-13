@@ -12,11 +12,18 @@ M12: [NormalizerRegistry](normalization.md), [JsonSchemaValidator](json-schema-v
 [ProvenanceValidator и ValidationReportBuilder](provenance-validation.md).
 M13: [staging и явный bootstrap](staging.md), [read-only dry-run](dry_run.md),
 [PostgreSQLLoader, atomic/quarantine и durable replay](loader.md).
+M14: [SecurityPolicy/SecuritySession](resource-policy.md),
+[ContentProtector и protected restore](privacy-redaction.md),
+[InjectionDetector/InjectionAwareSecurityScanner](prompt-injection.md),
+[DatabasePolicy, AuditChain и parser runners](security-controls.md).
 Общая SDK facade пока не реализует LLM orchestration.
 
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
 текущей реализации M4, M5-A/B/C, bounded M6-A/B/C/D, M7, M8, M9, M10, M11 и standalone M12 A–D в
-scope соответствующих руководств, а также отдельные PostgreSQL API M13 A–D.
+scope соответствующих руководств, отдельные PostgreSQL API M13 A–D и controls M14.
+M14 поставляет самостоятельные APIs с явным подключением adapters; полного
+source→DLP→routing→load→HMAC lifecycle и OS sandbox backend нет.
+Незакрытые критерии перечислены в [приёмке M14](plans/M14_acceptance.md).
 Facade-операции pipeline остаются незавершёнными; M11 вызывается как отдельный сервис.
 M13 не реализует общий `ingest`, coordinator всех validation layers и
 DB-generated PK. `DatabaseAdapter.execute` остаётся заглушкой; запись доступна

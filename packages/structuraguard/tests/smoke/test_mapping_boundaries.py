@@ -18,6 +18,7 @@ def test_mapper_imports_only_contracts_domain_and_explicit_pure_dependencies() -
         "re",
         "typing",
         "unicodedata",
+        "uuid",  # M14: fixed-size UUID в bounded policy preflight, без I/O.
     }
     semantic_imports = {
         "_validation_input.py": {"json"},

@@ -2,6 +2,69 @@
 
 Обновлено: 2026-09-13.
 
+## M14 — подготовка к ручному commit и PR
+
+**Частичная поставка подготовлена к ручному commit и PR в `main`; полный M14
+не принят.** Commit, staging, push и PR агентом не выполнялись. Каноническое
+основание — [M14 ТЗ][spec-m14-current]. Статус каждого K1–K7 и перечень реально
+выполненных команд находятся в [плане M14](../plans/M14_security_layer.md),
+подробная связь A1–D5 с tests — в [матрице приёмки](../plans/M14_acceptance.md).
+
+Поставлены самостоятельные API с явной host composition:
+[общие resource limits и parser runner](../resource-policy.md),
+[классификация/redaction и protected restore](../privacy-redaction.md),
+[prompt-injection signals и routing restrictions](../prompt-injection.md),
+[DB policy, HMAC audit и sandbox boundary](../security-controls.md).
+Общий budget сужает existing guards; source и model output остаются untrusted.
+Signed PostgreSQL mode сохраняет event и delivery intent в target transaction;
+legacy targets без central policy не получают HMAC автоматически. Sandbox
+interface требует реального host backend для OS isolation.
+
+Закрыты K4 и K6 в заявленном SDK scope. K1–K3 и K7 остаются частичными; K5
+расходится с буквальным требованием любого signed real load из-за принятой
+совместимости ADR 0031. ADR 0033 допускает configurable LOCAL_ONLY/OBSERVE;
+отсутствие signals не означает safety или разрешённый egress. Criteria и tests
+не ослаблены; нового архитектурного решения при передаче не принято.
+
+[Security review](../plans/M14_security_review.md) фиксирует исправления:
+M14-SR-01 — raw source/DLP diagnostics; M14-SR-02 — незакрытый security run после
+sandbox failure; M14-SR-03 — High, обход DB policy в SQLite constraint reader.
+Последний fix добавил central scope admission до connection и общую с inspector
+проверку свежих колонок до definitions/EXISTS. Его 15 regression cases проходят;
+до fix 13 падали. Публичные сигнатуры последним fix не менялись. Повторный review
+существенных findings в реализованном scope не выявил.
+
+После последнего runtime fix: **4373 main, 1391 security, 30 integration** tests
+passed; узкий SQLite/constraint набор — 283 passed. Ruff — 570 files, mypy —
+566 source files, passed. На подготовке передачи lock-check и offline wheel/sdist
+с installed distribution verification прошли. Финальный PostgreSQL gate —
+430 passed на PostgreSQL 16/18; документационные tests — 207 passed,
+включая M14 offline examples. Strict MkDocs build и `git diff --check` прошли;
+новые anchors исправлены без ослабления link validation. Полные команды,
+история исправленных failures и объяснения пропусков — в плане M14.
+
+Документация описывает русские public docstring, typed errors, I/O/cancellation,
+migration fingerprints и обязательный `ParserResourceGuard.record_failure(code)`
+для custom guard. Семь M14 примеров извлекаются из Markdown и проверяются без
+network; API не обещает готовую end-to-end composition. При передаче меняются
+только docs/state/traceability, исполняемый код и test assertions не меняются.
+
+Diff: 128 файлов (50 tracked changes, 78 новых). Проверены состав файлов,
+credential signatures и production AST: реальных secrets, debug artifacts и
+случайных generated files не обнаружено. Test DSN/key markers — synthetic
+canaries. Не выполнялось отключение gates; security extra и supply-chain
+ограничения описаны в review.
+
+Открыты filesystem safe-open/roots/no-follow/TOCTOU, export sinks/formula safety,
+общий warning bridge, central Tika DLP veto, полная source/DLP/egress/load/HMAC
+composition и performance baseline §32.5. Host sandbox/network/temp isolation,
+outbox delivery/crash recovery, provider retention, physical map erasure и
+key/store compromise recovery не подтверждены SDK suites. HMAC требует защиты
+ключа и независимого anchor; detectors имеют FP/FN и не гарантируют распознавание
+произвольных ФИО в свободном тексте.
+
+[spec-m14-current]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m14-security
+
 ## M13 — подготовка к ручному commit и PR
 
 Самостоятельные PostgreSQL API A–D готовы к отдельному PR в `main`; **полный M13

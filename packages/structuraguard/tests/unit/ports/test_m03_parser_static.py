@@ -87,9 +87,13 @@ def test_parser_registry_layer_has_no_llm_database_or_orchestrator_dependency() 
         "structuraguard.contracts.common",
         "structuraguard.contracts.plugins",
         "structuraguard.contracts.source",
+        "structuraguard.contracts.sandbox",
+        "structuraguard.contracts.security",
         "structuraguard.exceptions",
         "structuraguard.ports.parser",
         "structuraguard.ports.source",
+        "structuraguard.ports.sandbox",
+        "structuraguard.ports.resources",
     }
 
     for source_path in sorted(PARSERS_ROOT.rglob("*.py")):

@@ -24,6 +24,7 @@ _ALLOWED_EXTERNAL_ROOTS = {
             "typing",
             "types",  # MappingProxyType для immutable views; stdlib без I/O.
             "unicodedata",
+            "uuid",  # M14: opaque UUID DTO/serialization; без генерации UUID при import.
         }
     ),
     # M12: calendar/Decimal/closed regex grammars — pure stdlib, без I/O.
@@ -41,7 +42,9 @@ _ALLOWED_EXTERNAL_ROOTS = {
             "re",
         }
     ),
-    "ports": frozenset({"__future__", "collections", "dataclasses", "typing"}),
+    "ports": frozenset(
+        {"__future__", "collections", "dataclasses", "typing", "uuid", "contextlib"}
+    ),
 }
 
 

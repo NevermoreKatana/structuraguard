@@ -44,6 +44,7 @@ nav:
   - Требования: requirements.md
   - Архитектура: architecture.md
   - Публичный API: public-api.md
+  - Security DB, audit и runners M14: security-controls.md
   - Database Inspector M7: database-inspection.md
   - Normalized Profiler M8: normalized-profiling.md
   - Deterministic Mapper M9: deterministic-mapping.md
@@ -61,6 +62,9 @@ nav:
   - LLM semantic parsing M6: llm-semantic-parsing.md
   - Hybrid semantic parsing M6: semantic-parsing.md
   - Безопасность ParsePlan: security.md
+  - Централизованные лимиты M14: resource-policy.md
+  - Классификация и маскирование M14: privacy-redaction.md
+  - Prompt-injection signals M14: prompt-injection.md
   - Модель угроз: threat-model.md
   - ADR:
       - Public API и run policies: adr/0001-public-api-and-run-policies.md
@@ -92,7 +96,14 @@ nav:
       - Read-only dry-run planning: adr/0027-read-only-dry-run-planning.md
       - Atomic PostgreSQL loader: adr/0028-atomic-postgresql-insert-upsert.md
       - Ledger и quarantine: adr/0029-loader-ledger-and-quarantine.md
+      - Централизованные resource limits: adr/0030-centralized-resource-limits.md
+      - DB policy, audit и sandbox boundary: adr/0031-security-audit-and-parser-boundaries.md
+      - Content classification и redaction: adr/0032-content-classification-and-redaction.md
+      - Prompt-injection signals: adr/0033-prompt-injection-signals.md
   - Планы:
+      - M14 — Security Policy и audit chain: plans/M14_security_layer.md
+      - Приёмка M14: plans/M14_acceptance.md
+      - Security review M14: plans/M14_security_review.md
       - Приёмка M12-C constraints: plans/M12_C_constraints_acceptance.md
       - M00 — требования: plans/M00_requirements.md
       - M01 — каркас SDK: plans/M01_sdk_scaffold.md

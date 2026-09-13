@@ -12,6 +12,7 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, model_validator
 
 from ._base import FrozenContract, canonical_sha256_value
+from .audit import AuditHead
 from .common import (
     FingerprintStr,
     IdentifierStr,
@@ -21,6 +22,7 @@ from .common import (
 )
 from .constraint_validation import CheckRuleBinding, ConstraintReadPolicy
 from .database import CatalogColumnRef, StagingContext
+from .database_policy import PostgreSQLAuditPolicy
 from .mapping import MappingPlan
 from .mapping_validation import MappingValidationPolicy
 from .normalized import NormalizedBatch
@@ -198,6 +200,9 @@ class PostgreSQLLoadPolicy(_Sensitive):
         max_batch_bytes: Бюджет значений одного SQL batch.
         server_values: Явные разрешения вычислять существующие non-key defaults.
         ledger: Policy заранее установленного журнала той же DB либо None.
+        audit: PostgreSQLAuditPolicy заранее установленной audit schema либо None.
+            Signed event и delivery intent записываются в target transaction;
+            central require_signed_audit не допускает None. Signer передаётся loader.
 
     Raises:
         pydantic.ValidationError: Неверные limits, повтор tables/permissions,
@@ -216,6 +221,9 @@ class PostgreSQLLoadPolicy(_Sensitive):
     max_batch_bytes: Annotated[PositiveInt, Field(le=16777216)] = 1048576
     server_values: tuple[ServerValuePermission, ...] = Field(default=(), max_length=512)
     ledger: LoadLedgerPolicy | None = None
+    audit: PostgreSQLAuditPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def admission(self) -> Self:
@@ -286,6 +294,9 @@ class PostgreSQLLoadResult(_Sensitive):
     attempt_run_id: IdentifierStr | None = None
     generated_at: UtcDateTime
     warnings: tuple[IdentifierStr, ...] = Field(default=(), max_length=16)
+    audit_head: AuditHead | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     def safe_summary(self) -> dict[str, int | bool]:
         """Вернуть counts и признаки результата, пригодные для logs.

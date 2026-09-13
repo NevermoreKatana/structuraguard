@@ -2,6 +2,14 @@
 
 ## Статус документа
 
+Актуальное evidence M14 DB/audit/sandbox приведено в разделе
+[реализованных controls M14 D](#controls-m14-d). Исторические `PLANNED` ниже
+описывают baseline M0–M3 и не отменяют этот перечень подтверждённых границ.
+
+[Security review текущего M14 diff](plans/M14_security_review.md) фиксирует
+исправления M14-SR-01 (TB-02/07/08, SR-20: foreign error diagnostics) и M14-SR-02
+(TB-03/06/08, SR-07/10/17/20: terminal sandbox failure) с regression evidence.
+
 Этот документ задаёт нормативную модель угроз для design baseline M0 и отмечает
 ограниченный runtime subset, подтверждённый в M1–M3. Каждый control имеет два
 независимых статуса:
@@ -151,9 +159,24 @@ passwords, private keys и credentials всегда рассматриваютс
 Detector не считается безошибочным: сомнение блокирует egress и создаёт
 security decision, а не включает permissive fallback.
 
+### Prompt-injection signals M14
+
+Implementation status: `PARTIAL` (`M14 C`). [Bounded detector и scanner wrapper](prompt-injection.md)
+добавляют multilingual signal evidence, run-local risk до masking, cloud restrictions
+и NEEDS_REVIEW без semantic execution. Исходный текст остаётся untrusted; existing
+schema/candidate/source validation, no-tools и privacy routing сохраняются.
+Отсутствие signals не доказывает безопасность. Полный host DLP/egress scanner и
+HMAC audit delivery этим дополнительным control не подменяются.
+
 ### Masking map и ключи
 
-Control status: `REQUIRED`; implementation status: `PLANNED` (`M8`, `M12`).
+Control status: `REQUIRED`; implementation status: `PARTIAL` (`M14 B`).
+Bounded detection/redaction и отдельный encrypted memory map реализованы в
+[срезе M14](privacy-redaction.md), [ADR 0032](adr/0032-content-classification-and-redaction.md).
+Production egress bridge и полная lifecycle composition остаются планом.
+[HMAC/key verification](security-controls.md) реализованы в M14 D; retention
+verification keys задаёт host. Для ephemeral masking store rotation отзывает
+handles и старый key context; audit rotation имеет отдельный lifecycle.
 
 - Masking выполняется до provider boundary. Placeholder не должен раскрывать
   исходное значение и должен быть стабилен только в пределах требуемого run.
@@ -677,6 +700,23 @@ error содержит стабильный `error_code`, безопасный `
 Новые codes должны быть machine-readable, не переиспользовать старый смысл и
 не включать sensitive values. До определения кода feature не считается готовой;
 перечисленные выше имена входят в стабильный M0 contract.
+
+## Реализованные controls M14 D {#controls-m14-d}
+
+Contracts и подключение: [DB/audit/runners](security-controls.md),
+[ADR 0031](adr/0031-security-audit-and-parser-boundaries.md).
+
+| Control / trust boundary | Default deny и evidence | Остаточный риск / статус |
+|---|---|---|
+| D1, TB-01/TB-05/TB-06, SR-14/15/16/29 | `DatabasePolicy` exact allow/deny schemas/tables/columns, system/unsafe names rejected, разные principals. Column preflight до full reflection; repeated writer scope/grants/schema validation. `security/database/test_m14_database_policy.py`, `test_m14_constraint_policy.py` (SQLite reader: rebound catalog, no forbidden connection/definitions/EXISTS), `integration/database/test_m14_audit_database.py`; existing loading/mapping/inspection suites | IMPLEMENTED для явно настроенной policy; обход M14-SR-03 исправлен. Partial column catalog закрыт; SQLite не моделирует PG roles; DBA/driver остаются trusted |
+| D2, TB-08, SR-20 | Closed `SecurityAuditEvent`: UUID/UTC/fingerprints/counts/status, stage evidence; arbitrary payload и sensitive identifiers rejected. `security/audit/test_m14_audit_chain.py` | IMPLEMENTED. Trusted producer отвечает за истинность evidence и UUID registry; metadata позволяют корреляцию |
+| D3, TB-08, SR-21/22/27 | HMAC canonical body + previous digest, sequence/run/policy/key binding, atomic CAS, bounded verify, rotation/unknown key denial, empty history rejection. Mutation/reorder/delete/duplicate/splice и anchored truncation fixtures, property tests | IMPLEMENTED. Без external head нельзя доказать полноту; key holder может переписать chain; key/store compromise описан в guide |
+| D4, TB-06/TB-08, SR-17/28 | Target DML + signed event + delivery intent в одной PG transaction, signer/layout/grants preflight, receipt head, replay verification. Rollback event отдельно; failure даёт audit gap. `integration/database/test_m14_audit_database.py`; M13 commit/reconciliation suites | IMPLEMENTED SDK persistence. Host delivery at-least-once, ack отдельно; ambiguous commit сохраняет UNKNOWN. Legacy unsigned mode явно отделён |
+| D5, TB-03/TB-02/TB-04, SR-07/08/10/19/24 | Common runner protocol, complete capability profile, pinned spec allowlist до read/start; core не импортирует plugin. Frame/result/depth caps, existing registry output validation, timeout/cancel/cleanup ack. `security/sandbox/test_m14_runner_boundary.py`; existing discovery/document strict suites | INTERFACE IMPLEMENTED. SR-09: **real isolation unverified**. Core не поставляет OS backend и не утверждает container isolation по boolean от plugin |
+
+No-shell проверяется отсутствием shell/process-command API в runner; transport
+и OS backend обязаны принимать argv без shell interpolation. Их реальные
+network/filesystem/process controls проверяет отдельная host contract suite.
 
 ## План security regression evidence
 

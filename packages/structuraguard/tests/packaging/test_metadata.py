@@ -23,10 +23,12 @@ EXPECTED_EXTRAS = frozenset(
         "tika",
         "xml",
         "yaml",
+        "security",
         "all",
     }
 )
 EXPECTED_EXTRA_PACKAGES: Mapping[str, frozenset[str]] = {
+    "security": frozenset({"cryptography"}),
     "sqlite": frozenset({"sqlalchemy"}),
     "xml": frozenset({"defusedxml"}),
     "yaml": frozenset({"pyyaml"}),

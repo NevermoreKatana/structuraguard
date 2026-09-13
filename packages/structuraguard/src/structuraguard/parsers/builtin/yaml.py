@@ -66,6 +66,7 @@ class YamlParserLimits(MarkupLimits):
     max_documents: int = 10000
     max_aliases: int = 1000
     max_anchors: int = 1000
+    max_columns: int = 1000000
 
     def __post_init__(self) -> None:
         MarkupLimits.__post_init__(self)
@@ -74,6 +75,7 @@ class YamlParserLimits(MarkupLimits):
             ("max_documents", 100000, 1),
             ("max_aliases", 100000, 0),
             ("max_anchors", 100000, 0),
+            ("max_columns", 1000000, 1),
         ):
             value = getattr(self, name)
             if type(value) is not int or not minimum <= value <= cap:
@@ -190,6 +192,7 @@ async def _document(
             )
             metadata: list[PhysicalMetadataEntry] = []
             if parent and trees[parent.index].node_kind is PhysicalNodeKind.MAPPING:
+                budget.check("columns", order // 2 + 1, limits.max_columns)
                 metadata.extend(
                     (
                         PhysicalMetadataEntry(

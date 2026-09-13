@@ -20,6 +20,7 @@ from structuraguard.contracts.profiling import (
     ProfileReason,
     TypeKind,
 )
+from structuraguard.domain.pii_patterns import russian_inn as _inn
 from structuraguard.domain.scalar_grammar import date_candidates
 from structuraguard.domain.scalar_grammar import decimal_candidates as _numbers
 
@@ -44,43 +45,6 @@ class Scan:
     reasons: set[ProfileReason] = field(default_factory=set)
     categories: set[PIICategory] = field(default_factory=set)
     currencies: set[str] = field(default_factory=set)
-
-
-def _inn(text: str) -> PatternCode | None:
-    if (
-        not text.isascii()
-        or not text.isdigit()
-        or len(text) not in (10, 12)
-        or not int(text)
-    ):
-        return None
-    digits = [int(c) for c in text]
-    if len(digits) == 10:
-        check = (
-            sum(
-                a * b
-                for a, b in zip(digits, (2, 4, 10, 3, 5, 9, 4, 6, 8), strict=False)
-            )
-            % 11
-            % 10
-        )
-        return "russian_inn_10" if check == digits[9] else None
-    first = (
-        sum(
-            a * b for a, b in zip(digits, (7, 2, 4, 10, 3, 5, 9, 4, 6, 8), strict=False)
-        )
-        % 11
-        % 10
-    )
-    second = (
-        sum(
-            a * b
-            for a, b in zip(digits, (3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8), strict=False)
-        )
-        % 11
-        % 10
-    )
-    return "russian_inn_12" if (first, second) == (digits[10], digits[11]) else None
 
 
 def _dates(text: str, locale: LocalePolicy, result: Scan) -> None:

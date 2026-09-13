@@ -46,6 +46,7 @@ class PdfParserLimits(DocumentParserLimits):
     max_blocks_per_page: int = 10000
     max_tables_per_page: int = 100
     max_cells_per_page: int = 10000
+    max_columns: int = 100000
 
     def __post_init__(self) -> None:
         DocumentParserLimits.__post_init__(self)
@@ -55,6 +56,7 @@ class PdfParserLimits(DocumentParserLimits):
             ("max_blocks_per_page", 100000),
             ("max_tables_per_page", 1000),
             ("max_cells_per_page", 100000),
+            ("max_columns", 1000000),
         ):
             value = getattr(self, name)
             if type(value) is not int or not 1 <= value <= cap:
@@ -307,6 +309,7 @@ def extract_pdf(
             budget.check("page_tables", len(detected), limits.max_tables_per_page)
             cell_count = 0
             for table_index, table in enumerate(detected):
+                budget.check("columns", table.col_count, limits.max_columns)
                 budget.check(
                     "page_cells",
                     cell_count + table.row_count * table.col_count,
@@ -315,6 +318,7 @@ def extract_pdf(
                 table_id = budget.identity("table")
                 cells: list[ExtractedCell] = []
                 for row_index, row in enumerate(table.extract()):
+                    budget.check("columns", len(row), limits.max_columns)
                     for column_index, cell_text in enumerate(row):
                         cell_count += 1
                         budget.check(

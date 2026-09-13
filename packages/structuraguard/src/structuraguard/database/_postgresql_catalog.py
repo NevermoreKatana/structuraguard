@@ -222,6 +222,27 @@ async def reflect(
     reader: PostgreSQLReader, names: tuple[TableName, ...]
 ) -> DatabaseMetadataSnapshot:
     target = reader.target
+    if target.security_policy is not None:
+        from structuraguard.domain.database_policy import authorize_database
+
+        # Только имена до comments/defaults/constraints. Не скрываем ограничения
+        # из частичного каталога: любая запрещённая колонка закрывает таблицу.
+        for schema, name in names:
+            columns = await reader.rows(
+                "SELECT a.attname AS name FROM pg_catalog.pg_attribute a "
+                "JOIN pg_catalog.pg_class c ON c.oid=a.attrelid "
+                "JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname=:schema AND c.relname=:table AND a.attnum>0 "
+                "AND NOT a.attisdropped ORDER BY a.attnum LIMIT :row_limit",
+                {"schema": schema, "table": name},
+                target.limits.max_columns,
+            )
+            authorize_database(
+                target.security_policy,
+                schema=schema,
+                table=name,
+                columns=(string(c, "name") for c in columns),
+            )
     schemas: dict[str, Row] = {}
     tables: dict[TableName, ReflectedTable] = {}
     for schema in sorted({name[0] for name in names}):

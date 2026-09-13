@@ -14,10 +14,17 @@ from structuraguard.contracts.loading import (
     PostgreSQLLoadPolicy,
     PostgreSQLLoadResult,
 )
+from structuraguard.contracts.security import Resource
 from structuraguard.contracts.staging import StagingRun, StagingRunStatus
-from structuraguard.exceptions import StructuraGuardError
+from structuraguard.exceptions import (
+    LoadError,
+    SecurityPolicyError,
+    StructuraGuardError,
+)
 from structuraguard.loading.projection import checked, failure, prepare
 from structuraguard.loading.staged_input import finish_staging, verify_staging
+from structuraguard.ports.audit import AuditSigner
+from structuraguard.ports.resources import DatabaseResourceGuard
 from structuraguard.ports.stores import RunStagingStore
 
 from ._inspection import inspection_slot
@@ -35,9 +42,14 @@ class PostgreSQLLoader:
         policy: Atomic/quarantine admission, write tables, bulk и optional ledger.
         staging: Trusted RunStagingStore; loader не вызывает begin/stage/bootstrap.
         clock: UTC часы для expiry и отчёта; None использует datetime.now(UTC).
+        resources: Необязательный общий guard для batches/queries/deadline.
+            Передаётся напрямую, без внешнего run.call вокруг execute/COMMIT.
+        audit_signer: Явный signer для policy.audit; без обязательной audit
+            configuration/signature loader отказывает AUDIT_DURABILITY_REQUIRED.
 
     Raises:
         LoadError: Неверные target/policy либо несовпадающий writer principal.
+            Также отсутствие обязательного signed audit до первого I/O.
         DatabaseInspectionError: Некорректная конфигурация inspector.
 
     Конструктор не выполняет I/O. Statement/row values не принимаются извне.
@@ -52,6 +64,8 @@ class PostgreSQLLoader:
         policy: PostgreSQLLoadPolicy,
         staging: RunStagingStore,
         clock: Callable[[], datetime] | None = None,
+        resources: DatabaseResourceGuard | None = None,
+        audit_signer: AuditSigner | None = None,
     ) -> None:
         if type(target) is not PostgreSQLWriterTarget:
             raise failure("LOAD_WRITER_TARGET_INVALID")
@@ -60,12 +74,27 @@ class PostgreSQLLoader:
             inspection=inspector, dsn=target.dsn, principal=target.principal
         )
         self._policy = checked(policy, PostgreSQLLoadPolicy, 4194304)
+        if resources is not None:
+            from structuraguard.domain.resource_limits import load_policy
+
+            self._policy = load_policy(resources.limits, self._policy)
         if target.principal != policy.preflight.writer_principal:
             raise failure("LOAD_WRITER_TARGET_INVALID")
         self._staging = staging
         self._clock = clock or (lambda: datetime.now(UTC))
         self._active = threading.Lock()
         self._unavailable = False
+        self._resources = resources
+        if self._policy.audit is not None and audit_signer is None:
+            raise failure("AUDIT_DURABILITY_REQUIRED")
+        central = inspector.security_policy
+        if (
+            central is not None
+            and central.require_signed_audit
+            and self._policy.audit is None
+        ):
+            raise failure("AUDIT_DURABILITY_REQUIRED")
+        self._audit_signer = audit_signer
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -92,7 +121,9 @@ class PostgreSQLLoader:
         Для logs предназначен только safe_summary результата.
         """
         return await PostgreSQLDryRunPlanner(
-            self._writer.inspection, policy=self._policy.preflight
+            self._writer.inspection,
+            policy=self._policy.preflight,
+            resources=self._resources,
         ).plan(request)
 
     async def execute(self, request: LoadRequest) -> PostgreSQLLoadResult:
@@ -124,30 +155,63 @@ class PostgreSQLLoader:
         Replay сохраняет исходные counts/run_id с replayed=True; safe_summary
         показывает новые INSERT/UPDATE равными нулю. Полный JSON чувствителен.
         """
+        audit_gap = False
         try:
             if self._policy.ledger is not None:
                 # Между processes и вызовами одного экземпляра authority — DB lock.
                 return await self._execute(request)
             with inspection_slot(self._active, unavailable=self._unavailable):
                 return await self._execute(request)
+        except asyncio.CancelledError as error:
+            if self._resources is not None:
+                self._resources.record_cancelled()
+            cancellation = asyncio.CancelledError()
+            note = "AUDIT_GAP: terminal audit не подтверждён после rollback."
+            if note in getattr(error, "__notes__", ()):
+                cancellation.add_note(note)
+            raise cancellation from None
         except StructuraGuardError as error:
             code = error.error_code
+            audit_gap = error.details.get("audit_gap") is True
         except TimeoutError:
             code = "PROCESSING_TIMEOUT"
+        if self._resources is not None:
+            self._resources.record_failure(code)
+            if code in {
+                "SECURITY_LIMIT_EXCEEDED",
+                "PROCESSING_TIMEOUT",
+                "SECURITY_RUN_CLOSED",
+            }:
+                raise SecurityPolicyError(
+                    error_code=code,
+                    message="Загрузка отклонена resource policy.",
+                    details={"audit_gap": True} if audit_gap else None,
+                ) from None
+        if audit_gap:
+            raise LoadError(
+                error_code=code,
+                message="Load отклонён; terminal audit не подтверждён.",
+                details={"audit_gap": True, "transaction_outcome": "rolled_back"},
+            )
         raise failure(code) from None
 
     async def _execute(self, request: LoadRequest) -> PostgreSQLLoadResult:
         policy = self._policy
+        seconds = self._writer.inspection.limits.timeout_seconds
+        if self._resources is not None:
+            seconds = min(
+                seconds, self._resources.remaining_seconds(Resource.PROCESSING_TIME_MS)
+            )
         max_bytes = policy.preflight.read_policy.limits.max_bytes
         request = checked(request, LoadRequest, max_bytes)
         if (policy.ledger is None) != (request.idempotency_key is None):
             raise failure("LOAD_IDEMPOTENCY_REQUIRED")
         target = writer_scope(self._writer)
         started_at = self._now()
-        budget_end = asyncio.get_running_loop().time() + target.limits.timeout_seconds
-        deadline = started_at + timedelta(seconds=target.limits.timeout_seconds)
+        budget_end = asyncio.get_running_loop().time() + seconds
+        deadline = started_at + timedelta(seconds=seconds)
         claimed: StagingRun | None = None
-        async with asyncio.timeout(target.limits.timeout_seconds):
+        async with asyncio.timeout(seconds):
             prepared = await prepare(
                 request.snapshot,
                 max_bytes=max_bytes,
@@ -186,6 +250,8 @@ class PostgreSQLLoader:
                 await claim()
 
         def check_deadline() -> None:
+            if self._resources is not None:
+                self._resources.check_deadline()
             if asyncio.get_running_loop().time() >= budget_end:
                 raise failure("PROCESSING_TIMEOUT")
             if self._now() >= request.staging_context.expires_at:
@@ -200,6 +266,8 @@ class PostgreSQLLoader:
             claim_staging=claim,
             check_deadline=check_deadline,
             timeout_seconds=max(0.001, budget_end - asyncio.get_running_loop().time()),
+            resources=self._resources,
+            audit_signer=self._audit_signer,
         )
         result = outcome.result
         finalize_status = (
@@ -225,9 +293,22 @@ class PostgreSQLLoader:
             raise failure("LOAD_OUTCOME_UNKNOWN")
         if outcome.status is not StagingRunStatus.COMMITTED:
             if outcome.cancelled or finalize_cancelled:
-                raise asyncio.CancelledError
+                cancellation = asyncio.CancelledError()
+                if outcome.audit_gap:
+                    cancellation.add_note(
+                        "AUDIT_GAP: terminal audit не подтверждён после rollback."
+                    )
+                raise cancellation
+            if outcome.audit_gap:
+                raise LoadError(
+                    error_code=outcome.code or "LOAD_DATABASE_FAILED",
+                    message="Load отклонён; terminal audit не подтверждён.",
+                    details={"audit_gap": True, "transaction_outcome": "rolled_back"},
+                )
             raise failure(outcome.code or "LOAD_DATABASE_FAILED")
         assert result is not None
+        if outcome.code == "AUDIT_COMMITTED_UNVERIFIED":
+            raise failure("AUDIT_COMMITTED_UNVERIFIED")
         warnings = outcome.warnings
         if not finalized:
             warnings += ("LOAD_STAGING_FINALIZE_FAILED",)

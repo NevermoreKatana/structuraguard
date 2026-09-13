@@ -37,7 +37,12 @@ from structuraguard.contracts.reports import (
 )
 from structuraguard.exceptions import LLMProviderError
 
-from ._boundary import call_record, checked_request, sanitized_provider_error
+from ._boundary import (
+    call_record,
+    checked_request,
+    enforce_security_route,
+    sanitized_provider_error,
+)
 from ._http import read_bounded, safe_transport
 from ._structured import LLMPromptTemplate, LLMResponseSchema, parse_object
 
@@ -344,6 +349,7 @@ class OpenAICompatibleProvider:
 
     def _wire(self, request: LLMRequest) -> tuple[bytes, LLMResponseSchema]:
         caps = self.capabilities
+        enforce_security_route(request, caps)
         if request.data_classification not in self._config.allowed_classifications or (
             request.data_classification is DataClassification.RESTRICTED
             and caps.execution_environment is not LLMExecutionEnvironment.LOCAL

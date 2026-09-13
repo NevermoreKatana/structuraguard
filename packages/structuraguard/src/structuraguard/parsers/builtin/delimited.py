@@ -1179,6 +1179,7 @@ async def _decoded_chunks(
 
     offset = 0
     chunk = prefix
+    total_text_chars = 0
     while True:
         offset += len(chunk)
         is_final = offset == source.size_bytes
@@ -1189,6 +1190,13 @@ async def _decoded_chunks(
                 "decode_failed",
                 encoding=detection.reported_encoding,
             ) from None
+        if len(decoded) > context.max_text_chars - total_text_chars:
+            raise limit_error(
+                adapter_id="builtin.delimited",
+                resource="text_chars",
+                limit=context.max_text_chars,
+            )
+        total_text_chars += len(decoded)
         yield decoded, is_final
         if is_final:
             return

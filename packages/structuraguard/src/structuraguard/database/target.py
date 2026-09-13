@@ -9,6 +9,7 @@ from pydantic import Field, SecretStr, StrictInt, field_validator, model_validat
 
 from structuraguard.contracts._base import FrozenContract, canonical_sha256_value
 from structuraguard.contracts.common import IdentifierStr
+from structuraguard.contracts.database_policy import DatabasePolicy
 
 _PositiveInt = Annotated[StrictInt, Field(gt=0)]
 
@@ -65,6 +66,8 @@ class SQLiteTarget(FrozenContract):
         include_columns: Пока не поддержан; непустой selector отклоняет inspection.
         deny_columns: Пока не поддержан; отказ до чтения table metadata.
         limits: Неизменяемые бюджеты inspection.
+        security_policy: Необязательный DatabasePolicy с точными column selectors;
+            только сужает scope. Неполный column scope запрещает всю таблицу.
 
     Raises:
         pydantic.ValidationError: Относительный путь, дубликаты или unsafe names.
@@ -84,6 +87,9 @@ class SQLiteTarget(FrozenContract):
     include_columns: tuple[IdentifierStr, ...] = ()
     deny_columns: tuple[IdentifierStr, ...] = ()
     limits: InspectionLimits = Field(default_factory=InspectionLimits)
+    security_policy: DatabasePolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator(
         "include_tables",
@@ -130,6 +136,11 @@ class SQLiteTarget(FrozenContract):
         return canonical_sha256_value(
             {
                 "version": "sqlite-inspection-policy-v1",
+                **(
+                    {"security_policy": self.security_policy.canonical_json()}
+                    if self.security_policy
+                    else {}
+                ),
                 "tables": sorted(self.include_tables),
                 "deny_tables": sorted(self.deny_tables),
                 "schemas": sorted(self.include_schemas),
@@ -155,6 +166,8 @@ class PostgreSQLTarget(FrozenContract):
         include_columns: Пока не поддержан; непустой selector отклоняет inspection.
         deny_columns: Пока не поддержан; отказ до чтения table metadata.
         limits: Неизменяемые бюджеты inspection.
+        security_policy: Необязательный DatabasePolicy: scope только сужается,
+            principals сверяются с DB. По умолчанию требует signed audit для load.
 
     Raises:
         pydantic.ValidationError: Некорректные типы, дубликаты или unsafe names.
@@ -173,6 +186,9 @@ class PostgreSQLTarget(FrozenContract):
     include_columns: tuple[IdentifierStr, ...] = ()
     deny_columns: tuple[IdentifierStr, ...] = ()
     limits: InspectionLimits = Field(default_factory=InspectionLimits)
+    security_policy: DatabasePolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -221,6 +237,11 @@ class PostgreSQLTarget(FrozenContract):
         return canonical_sha256_value(
             {
                 "version": "postgresql-inspection-policy-v1",
+                **(
+                    {"security_policy": self.security_policy.canonical_json()}
+                    if self.security_policy
+                    else {}
+                ),
                 "schemas": sorted(self.include_schemas),
                 "tables": sorted(self.include_tables),
                 "deny_schemas": sorted(self.deny_schemas),
