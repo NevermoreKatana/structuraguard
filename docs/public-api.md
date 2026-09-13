@@ -16,21 +16,23 @@ M14: [SecurityPolicy/SecuritySession](resource-policy.md),
 [ContentProtector и protected restore](privacy-redaction.md),
 [InjectionDetector/InjectionAwareSecurityScanner](prompt-injection.md),
 [DatabasePolicy, AuditChain и parser runners](security-controls.md).
-Общая SDK facade пока не реализует LLM orchestration.
+M15: [SDK orchestrator, typed facade, IngestResult и sync lifecycle](sdk-orchestrator.md).
 
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
 текущей реализации M4, M5-A/B/C, bounded M6-A/B/C/D, M7, M8, M9, M10, M11 и standalone M12 A–D в
 scope соответствующих руководств, отдельные PostgreSQL API M13 A–D и controls M14.
-M14 поставляет самостоятельные APIs с явным подключением adapters; полного
-source→DLP→routing→load→HMAC lifecycle и OS sandbox backend нет.
+Самостоятельные APIs M14 подключаются явно. M15 соединяет source classification,
+request-bound scanner, routing и pre-load gates; signed audit требует host factory
+и ключей. Готового OS sandbox backend и гарантии внешней доставки audit нет.
 Незакрытые критерии перечислены в [приёмке M14](plans/M14_acceptance.md).
-Facade-операции pipeline остаются незавершёнными; M11 вызывается как отдельный сервис.
+M15 соединяет эти components в bounded pipeline; standalone APIs сохранены.
 M13 не реализует общий `ingest`, coordinator всех validation layers и
 DB-generated PK. `DatabaseAdapter.execute` остаётся заглушкой; запись доступна
 через явный `PostgreSQLLoader`. Полный milestone принят частично:
 [матрица M13](plans/M13_acceptance.md).
 
-M12 пока не предоставляет общего coordinator: caller готовит projection для JSON
+Standalone M12 не предоставляет общего coordinator; M15 связывает его layers.
+Для отдельных вызовов caller готовит projection для JSON
 Schema/DB/rules, выбирает trusted policy и связывает layer results с provenance.
 Scalar normalizers синхронны; остальные validators вызываются через async API.
 `accepted` отдельного сервиса подтверждает только его scope. Report builder требует
@@ -40,7 +42,8 @@ Derived `NormalizedBatch` schema 1.3, автоматическая перепр�
 Текущие границы сверены в [аудите M12](plans/M12_acceptance_audit.md);
 целевой состав — в [каноническом разделе M12 ТЗ](https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m12-validation-engine).
 
-Начните с [копируемого примера CSV → NormalizedBatch](structure.md).
+Начните с [копируемого SDK-примера CSV → profile](sdk-orchestrator.md) либо
+[отдельных компонентов CSV → NormalizedBatch](structure.md).
 Канонические требования M5: [FR-014][spec-fr-014] и [раздел M5][spec-m5].
 
 ## ParsePlanValidator и ParsePlanExecutor M5-C
@@ -309,7 +312,7 @@ Profiler не подменяет parser sandbox. Legacy extraction `1.0.0` до�
 Схема profile `1.0.0` сохраняет прежние wire bytes. Изменение batch size может
 изменить extraction/profile fingerprints; при достаточном sample budget
 структура сравнивается по physical coordinates и содержанию observations.
-Реализации analyzer, validator и executor M5 описаны выше; facade pipeline пока не подключён.
+Реализации analyzer, validator и executor M5 описаны выше; M15 подключает их к facade.
 
 Целевой API следующих milestone описан в каноническом разделе
 [23. Публичный API SDK][spec-public-api]. Он не считается доступным, пока
@@ -318,7 +321,7 @@ Profiler не подменяет parser sandbox. Legacy extraction `1.0.0` до�
 ## Копируемый пример M1 {#m1-copyable-example}
 
 Основной facade асинхронный. В M1 его можно создать с явной конфигурацией, но
-предметные операции всегда завершаются типизированной ошибкой. Пример не читает
+`propose_schema` остаётся неподдержанным и возвращает typed error. Пример не читает
 источник и не возвращает фиктивный результат.
 
 <!-- example:m01-async:start -->
@@ -335,7 +338,7 @@ from structuraguard import (
 async def main() -> None:
     sdk = AsyncStructuraGuard(config=SDKConfig())
     try:
-        await sdk.inspect_source()
+        await sdk.propose_schema()
     except OperationNotImplementedError as error:
         print(error.error_code)
 
@@ -1080,42 +1083,18 @@ runtime dependency.
 Если `config` не передан facade, для каждого экземпляра создаётся отдельный
 `SDKConfig`. Переданный объект возвращается через свойство `config` без замены.
 
-## Facades и недоступные операции
+## Facades и операции pipeline
 
-`AsyncStructuraGuard` является canonical async-first точкой входа.
-`StructuraGuard` — отдельная composition-based sync-оболочка, а не subclass
-async facade. Обе принимают keyword-only `parser_registry: ParserRegistry | None`
-и публикуют его через read-only свойство `parsers`. Sync facade делегирует тому
-же registry, которым владеет внутренний async facade.
+`AsyncStructuraGuard` — основной async API, `StructuraGuard` — отдельная sync
+оболочка с тем же instance-local registry. Обе принимают keyword-only `config`,
+`parser_registry` и `dependencies`. Полные сигнатуры и typed results перечислены
+в [руководстве M15](sdk-orchestrator.md#operations).
 
-Обе facade объявляют имена будущих операций:
-
-- `inspect_source`;
-- `inspect_database`;
-- `create_plan`;
-- `validate_plan`;
-- `execute`;
-- `analyze`;
-- `ingest`;
-- `propose_schema`.
-
-Их предметные параметры и результаты в текущей версии не являются
-public contract. Позиционные и именованные аргументы не интерпретируются.
-Async-вызов всегда
-возбуждает `OperationNotImplementedError` с
-`error_code="SDK_OPERATION_NOT_IMPLEMENTED"` и canonical operation name в
-`details["operation"]`.
-
-Sync facade передаёт аргументы async facade без изменения. При явном вызове вне
-активного event loop он использует краткоживущий loop через `asyncio.run()` и
-получает тот же `SDK_OPERATION_NOT_IMPLEMENTED`. Внутри активного event loop
-вызов отклоняется до делегирования:
-
-```text
-SYNC_API_IN_ASYNC_CONTEXT
-```
-
-В async-приложении необходимо использовать `AsyncStructuraGuard`.
+M15 заменяет произвольные arguments stubs на DTO. `create_plan` и `validate_plan`
+являются aliases mapping API. Только `propose_schema` сохраняет
+`SDK_OPERATION_NOT_IMPLEMENTED`. В sync context manager один Runner обслуживает
+пошаговый flow; внутри уже работающего event loop вызов даёт
+`SYNC_API_IN_ASYNC_CONTEXT` до создания coroutine.
 
 ## Исключения
 
@@ -1444,7 +1423,8 @@ router M6-B не подставляется вместо конкретного 
 ## SQLiteDatabaseAdapter M7-A
 
 Канонические требования: [анализ целевой БД][spec-database] и [M7][spec-m7].
-Здесь описан подтверждённый inspection API; facade, mapping и loader не готовы.
+Здесь описан самостоятельный inspection API. Композиция facade/mapping/load
+добавлена в [M15](sdk-orchestrator.md), запись выполняет отдельный M13 loader.
 
 `structuraguard.database` экспортирует `SQLiteTarget`, `InspectionLimits` и
 `SQLiteDatabaseAdapter`. Async `inspect_metadata(DatabaseInspectionRequest)`
@@ -1453,7 +1433,7 @@ transaction и cleanup. Snapshot использует существующие c
 `inspection` metadata; legacy JSON без этих полей сохраняется.
 
 `inspect_metadata` сохраняет API части A без fingerprint. Полный
-`DatabaseAdapter.inspect` реализован в M7-C; общая SDK facade пока не подключена. Scope,
+`DatabaseAdapter.inspect` реализован в M7-C и подключён к facade в M15. Scope,
 read-only controls, пример и коды ошибок:
 [SQLite inspection](database-inspection.md),
 [ADR 0015](adr/0015-bounded-sqlite-inspection.md).

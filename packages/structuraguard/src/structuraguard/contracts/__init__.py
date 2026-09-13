@@ -157,6 +157,11 @@ from structuraguard.contracts.normalized import (
     SemanticFieldRef,
     SemanticSourceIndex,
 )
+from structuraguard.contracts.orchestration import (
+    IngestResult,
+    PipelineFailure,
+    SDKSecurityReport,
+)
 from structuraguard.contracts.parsing import (
     DocumentBlockGrouping,
     DocumentParsePlan,
@@ -408,6 +413,7 @@ __all__ = (
     "GroupLinesRule",
     "IndexCatalog",
     "IndexKeyCatalog",
+    "IngestResult",
     "IntegerScalar",
     "IssueSeverity",
     "ItemCountRule",
@@ -501,6 +507,7 @@ __all__ = (
     "PhysicalObjectKind",
     "PhysicalSample",
     "PhysicalSourceRef",
+    "PipelineFailure",
     "PipelineStatus",
     "PrefixTokenStart",
     "PresenceRule",
@@ -524,6 +531,7 @@ __all__ = (
     "RequiredIfRule",
     "RuleField",
     "RuleReference",
+    "SDKSecurityReport",
     "SafeProfileSummary",
     "SchemaCatalog",
     "SecurityApproval",

@@ -1,11 +1,11 @@
-from __future__ import annotations
+"""Facade guards и совместимые aliases после замены M1 stubs."""
 
 import gc
 import warnings
-from collections.abc import Awaitable, Callable
 from typing import Never
 
 import pytest
+from tests.fakes.pipeline import request
 
 from structuraguard import (
     AsyncStructuraGuard,
@@ -13,108 +13,78 @@ from structuraguard import (
     StructuraGuard,
     StructuraGuardError,
 )
-
-AsyncOperation = Callable[[], Awaitable[object]]
-SyncOperation = Callable[[], object]
-
-
-def _async_operations(
-    sdk: AsyncStructuraGuard,
-) -> tuple[tuple[str, AsyncOperation], ...]:
-    return (
-        ("inspect_source", sdk.inspect_source),
-        ("inspect_database", sdk.inspect_database),
-        ("create_plan", sdk.create_plan),
-        ("validate_plan", sdk.validate_plan),
-        ("execute", sdk.execute),
-        ("analyze", sdk.analyze),
-        ("ingest", sdk.ingest),
-        ("propose_schema", sdk.propose_schema),
-    )
-
-
-def _sync_operations(sdk: StructuraGuard) -> tuple[tuple[str, SyncOperation], ...]:
-    return (
-        ("inspect_source", sdk.inspect_source),
-        ("inspect_database", sdk.inspect_database),
-        ("create_plan", sdk.create_plan),
-        ("validate_plan", sdk.validate_plan),
-        ("execute", sdk.execute),
-        ("analyze", sdk.analyze),
-        ("ingest", sdk.ingest),
-        ("propose_schema", sdk.propose_schema),
-    )
+from structuraguard.pipeline import SourceRequest
 
 
 @pytest.mark.anyio
-async def test_all_async_operations_fail_with_an_explicit_typed_error() -> None:
-    sdk = AsyncStructuraGuard()
-
-    for operation_name, operation in _async_operations(sdk):
-        with pytest.raises(OperationNotImplementedError) as captured:
-            await operation()
-
-        assert captured.value.error_code == "SDK_OPERATION_NOT_IMPLEMENTED"
-        assert captured.value.details["operation"] == operation_name
-        assert captured.value.retryable is False
+async def test_schema_proposal_remains_explicitly_unsupported() -> None:
+    with pytest.raises(OperationNotImplementedError) as captured:
+        await AsyncStructuraGuard().propose_schema()
+    assert captured.value.details["operation"] == "propose_schema"
+    assert not captured.value.retryable
 
 
-def test_all_sync_operations_fail_with_an_explicit_typed_error() -> None:
-    sdk = StructuraGuard()
-
-    for operation_name, operation in _sync_operations(sdk):
-        with pytest.raises(OperationNotImplementedError) as captured:
-            operation()
-
-        assert captured.value.error_code == "SDK_OPERATION_NOT_IMPLEMENTED"
-        assert captured.value.details["operation"] == operation_name
-        assert captured.value.retryable is False
+def test_sync_schema_proposal_remains_explicitly_unsupported() -> None:
+    with pytest.raises(OperationNotImplementedError):
+        StructuraGuard().propose_schema()
 
 
-def test_sync_facade_delegates_arguments_to_the_async_facade(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+def test_sync_delegates_typed_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[SourceRequest] = []
 
-    async def delegated_inspect_source(
-        self: AsyncStructuraGuard,
-        *args: object,
-        **kwargs: object,
-    ) -> Never:
-        calls.append((args, kwargs))
+    async def delegated(self: AsyncStructuraGuard, source: SourceRequest) -> Never:
+        calls.append(source)
         raise OperationNotImplementedError("inspect_source")
 
-    monkeypatch.setattr(
-        AsyncStructuraGuard,
-        "inspect_source",
-        delegated_inspect_source,
-    )
-    source = object()
-
+    monkeypatch.setattr(AsyncStructuraGuard, "inspect_source", delegated)
+    source = request()
     with pytest.raises(OperationNotImplementedError):
-        StructuraGuard().inspect_source(source, format_hint="txt")
-
-    assert calls == [((source,), {"format_hint": "txt"})]
+        StructuraGuard().inspect_source(source)
+    assert calls == [source]
 
 
 @pytest.mark.anyio
-async def test_sync_operations_reject_an_active_event_loop_before_delegation() -> None:
+async def test_all_sync_guards_precede_coroutine_creation() -> None:
     sdk = StructuraGuard()
-
-    with warnings.catch_warnings(record=True) as recorded_warnings:
+    with warnings.catch_warnings(record=True) as recorded:
         warnings.simplefilter("always", RuntimeWarning)
-        for _operation_name, operation in _sync_operations(sdk):
-            with pytest.raises(StructuraGuardError) as captured:
-                operation()
-
-            assert not isinstance(captured.value, OperationNotImplementedError)
-            assert captured.value.error_code == "SYNC_API_IN_ASYNC_CONTEXT"
-
+        for name in (
+            "inspect_source",
+            "analyze_structure",
+            "create_parse_plan",
+            "validate_parse_plan",
+            "parse_semantically",
+            "profile_records",
+            "create_mapping_plan",
+            "validate_mapping_plan",
+            "execute",
+            "ingest",
+            "analyze",
+            "create_plan",
+            "validate_plan",
+        ):
+            kwargs = (
+                {"plan": None}
+                if name
+                in {
+                    "validate_parse_plan",
+                    "parse_semantically",
+                    "validate_mapping_plan",
+                    "validate_plan",
+                    "execute",
+                }
+                else {}
+            )
+            with pytest.raises(StructuraGuardError, match="SYNC_API_IN_ASYNC_CONTEXT"):
+                getattr(sdk, name)(request(), **kwargs)
+        with pytest.raises(StructuraGuardError, match="SYNC_API_IN_ASYNC_CONTEXT"):
+            sdk.inspect_database()
+        with pytest.raises(StructuraGuardError, match="SYNC_API_IN_ASYNC_CONTEXT"):
+            sdk.propose_schema()
         gc.collect()
+    assert not [w for w in recorded if "was never awaited" in str(w.message)]
 
-    assert not [
-        warning
-        for warning in recorded_warnings
-        if issubclass(warning.category, RuntimeWarning)
-        and "was never awaited" in str(warning.message)
-    ]
+
+def test_mapping_aliases_keep_one_implementation() -> None:
+    assert AsyncStructuraGuard.create_plan is AsyncStructuraGuard.create_mapping_plan
+    assert StructuraGuard.validate_plan is StructuraGuard.validate_mapping_plan

@@ -80,15 +80,15 @@ Format adapters возвращают физические `ExtractedBatch`, не
 бизнес-сущности. Executor M5 создаёт normalized records/entities, но business
 meaning остаётся `unresolved`. M6 дополняет его проверяемыми semantic proposals;
 ненулевые значения сохраняют provenance, неоднозначность требует `NEEDS_REVIEW`.
-DB reflection/load и общая ingest facade не реализованы. Вызов операции facade
-завершается контролируемой ошибкой
-`SDK_OPERATION_NOT_IMPLEMENTED`; это не успешный placeholder. Sync-вызов внутри
+DB reflection/load и bounded source→report соединены в
+[SDK orchestrator M15](sdk-orchestrator.md). `propose_schema` остаётся
+неподдержанным и возвращает `SDK_OPERATION_NOT_IMPLEMENTED`. Sync-вызов внутри
 активного event loop завершается `SYNC_API_IN_ASYNC_CONTEXT`.
 
 Contracts доступны через `structuraguard.contracts`, `structuraguard.ports` и
 `structuraguard.parsers`; сервисы M5/M6 — через `structuraguard.structure`,
 `structuraguard.llm` и `structuraguard.parsing`.
-Корневые exports M1 не расширены. Создание facade и
+Корневой API дополнен `IngestResult`. Создание facade и
 registry не сканирует installed distributions: discovery начинается только по
 явному вызову с allowlist policy. Подробнее см.
 [публичный API](public-api.md#m4-technical-parsers).

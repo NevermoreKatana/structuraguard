@@ -46,6 +46,7 @@ EXPECTED_PUBLIC_EXPORTS = frozenset(
     {
         "AsyncStructuraGuard",
         "DatabaseInspectionError",
+        "IngestResult",
         "LoadError",
         "MappingError",
         "OperationNotImplementedError",

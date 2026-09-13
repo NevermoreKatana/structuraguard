@@ -24,6 +24,7 @@ _M1_ROOT_EXPORTS = frozenset(
     {
         "AsyncStructuraGuard",
         "DatabaseInspectionError",
+        "IngestResult",
         "LoadError",
         "MappingError",
         "OperationNotImplementedError",

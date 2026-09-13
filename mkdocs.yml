@@ -44,6 +44,7 @@ nav:
   - Требования: requirements.md
   - Архитектура: architecture.md
   - Публичный API: public-api.md
+  - SDK orchestrator M15: sdk-orchestrator.md
   - Security DB, audit и runners M14: security-controls.md
   - Database Inspector M7: database-inspection.md
   - Normalized Profiler M8: normalized-profiling.md
@@ -100,7 +101,11 @@ nav:
       - DB policy, audit и sandbox boundary: adr/0031-security-audit-and-parser-boundaries.md
       - Content classification и redaction: adr/0032-content-classification-and-redaction.md
       - Prompt-injection signals: adr/0033-prompt-injection-signals.md
+      - SDK orchestrator: adr/0034-sdk-orchestrator.md
   - Планы:
+      - M15 — SDK orchestrator: plans/M15_sdk_orchestrator.md
+      - Приёмка M15: plans/M15_acceptance.md
+      - Security review M15: plans/M15_security_review.md
       - M14 — Security Policy и audit chain: plans/M14_security_layer.md
       - Приёмка M14: plans/M14_acceptance.md
       - Security review M14: plans/M14_security_review.md

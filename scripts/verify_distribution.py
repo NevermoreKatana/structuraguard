@@ -276,6 +276,17 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/ports/source.py",
         "structuraguard/ports/stores.py",
         "structuraguard/py.typed",
+        "structuraguard/contracts/orchestration.py",
+        "structuraguard/pipeline/__init__.py",
+        "structuraguard/pipeline/composition.py",
+        "structuraguard/pipeline/loading.py",
+        "structuraguard/pipeline/mapping.py",
+        "structuraguard/pipeline/orchestrator.py",
+        "structuraguard/pipeline/parsing.py",
+        "structuraguard/pipeline/session.py",
+        "structuraguard/pipeline/source.py",
+        "structuraguard/pipeline/state.py",
+        "structuraguard/pipeline/validation.py",
         "structuraguard/sdk.py",
         "structuraguard/sync_sdk.py",
     }
@@ -284,6 +295,7 @@ _PUBLIC_EXPORTS = frozenset(
     {
         "SDKConfig",
         "AsyncStructuraGuard",
+        "IngestResult",
         "StructuraGuard",
         "StructuraGuardError",
         "OperationNotImplementedError",
@@ -298,6 +310,9 @@ _PUBLIC_EXPORTS = frozenset(
 )
 _CONTRACT_EXPORTS = frozenset(
     {
+        "IngestResult",
+        "PipelineFailure",
+        "SDKSecurityReport",
         "ArtifactValueReference",
         "DetailedValidationReport",
         "NormalizationBinding",

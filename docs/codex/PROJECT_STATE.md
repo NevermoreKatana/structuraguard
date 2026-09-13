@@ -2,6 +2,178 @@
 
 Обновлено: 2026-09-13.
 
+## M15 — подготовка к ручному commit и PR {#m15-manual-handoff}
+
+Bounded copy-only M15 подготовлен к ручному commit и последующему PR в `main`.
+Все девять критериев отмечены по наблюдаемым tests в
+[итоговом checklist плана](../plans/M15_sdk_orchestrator.md#m15-commit-readiness).
+Существенных открытых findings в проверенном diff не обнаружено; полная приёмка
+§33 ТЗ и отсутствующие host integrations этим статусом не заявляются.
+
+Ветка `feat/m15-sdk-orchestrator`, HEAD `576bd3d`; 47 файлов (13 modified,
+34 new), index пуст. Secrets/debug artifacts и случайных generated files
+в составе изменений не обнаружено; `dist/` и `site/` остаются ignored outputs.
+Production dependencies не изменены. Commit, push и PR не создавались.
+
+Результаты полных gates после последних runtime fixes приведены ниже. При
+передаче повторены lock-check, docs tests, strict docs и diff checks;
+точные команды, результаты, объяснение сбоя uv в sandbox и причины непроверенных
+сценариев записаны в checklist плана. На этом шаге изменены только план и этот
+документ; новые runtime features не добавлялись. Remote CI и mergeability
+проверяются после ручной публикации.
+
+## M15 — исправления финального review {#m15-review-fix-checks}
+
+Исправлены только два findings последнего review; публичные сигнатуры и
+утверждённый bounded scope [плана M15](../plans/M15_sdk_orchestrator.md) сохранены.
+
+- **High, критерии 5/7:** отклонённый параллельный `execute` мог изменить общий
+  `dry_run` до проверки занятости. Теперь выбор режима защищён без await между
+  проверкой и резервированием, а защита действует до завершения terminal hooks
+  и сборки результата. Она снимается в finally. Stage-level busy остаётся отдельным
+  контролем; новый вызов не меняет mode/reports активной операции.
+- **Medium, критерии 7/8:** исключение loader после staging `COMMITTED` оставляло
+  `NOT_STARTED`. Теперь подтверждённый commit сохраняется с warning, включая
+  отмену и ошибку `LOAD_OUTCOME_UNKNOWN`. Counts не восстанавливаются из staging;
+  отсутствующий loader result не подменяется выдуманным LoadReport.
+
+Regression coverage (пути относительно `packages/structuraguard/tests/`):
+
+| Finding | Тест | Проверка |
+|---|---|---|
+| High | `security/pipeline/test_execute_admission.py` — 7 cases | Оба режима, ожидание stage/terminal hook, повторный вызов из того же hook, конкуренция с другой validation stage; отклонённый вызов не меняет snapshot/writes |
+| Medium | `unit/pipeline/test_acceptance_outcomes.py::test_committed_staging_preserves_outcome_without_loader_result` — 4 cases | Typed connection error, UNKNOWN, RuntimeError, CancelledError после commit: один write, COMMITTED с warnings, без raw canary и fabricated reports |
+| Оба | `integration/database/test_sdk_orchestrator.py::test_rejected_concurrent_execute_preserves_dry_run`, `test_committed_staging_preserves_outcome_after_lost_response` — 6 cases | PostgreSQL 16/18: dry-run сохраняет target; потеря ответа/отмена после настоящего COMMIT сохраняет outcome без повторного DML |
+
+До runtime fix все 11 новых unit/security cases падали; часы memory staging
+предварительно согласованы с фиксированными часами SDK, чтобы тест достигал loader.
+Шесть PostgreSQL cases также воспроизводили дефекты; необработанная отмена давала
+дополнительные teardown errors. После fix: новый unit/security набор вместе с
+существующими outcome tests — **14 passed**, узкий SDK набор — **306 passed**,
+весь SDK PostgreSQL module — **18 passed**, lint — 599 files, typecheck — 595 files,
+оба PASS. Реальные LLM не вызывались, новые production dependencies не добавлены.
+
+Команды этого исправления использовали
+`UV_CACHE_DIR=/private/tmp/structuraguard-m15-uv-cache`; offline packaging —
+существующий `/Users/katana/.cache/uv`.
+
+```bash
+uv run --locked --no-sync pytest \
+  packages/structuraguard/tests/security/pipeline/test_execute_admission.py \
+  packages/structuraguard/tests/unit/pipeline/test_acceptance_outcomes.py -q
+uv run --locked --no-sync pytest \
+  packages/structuraguard/tests/unit/pipeline \
+  packages/structuraguard/tests/security/pipeline \
+  packages/structuraguard/tests/property/pipeline \
+  packages/structuraguard/tests/unit/contracts/test_m15_orchestration.py \
+  packages/structuraguard/tests/unit/test_facades.py \
+  packages/structuraguard/tests/unit/test_operations.py \
+  packages/structuraguard/tests/docs/test_m15_example.py -q
+uv run --locked --no-sync pytest -W error::sqlalchemy.exc.SAWarning \
+  -m database_integration \
+  packages/structuraguard/tests/integration/database/test_sdk_orchestrator.py -q
+make lint typecheck
+make test
+make test-database
+make test-integration test-security
+make test-build
+make docs
+git diff --check
+```
+
+| Полный gate | Фактический результат |
+|---|---|
+| `make test` | 4668 passed, 448 deselected |
+| `make test-database` | 448 passed, PostgreSQL 16/18 |
+| `make test-integration` | 30 passed, 5086 deselected |
+| `make test-security` | 1420 passed |
+| `make test-build` | Offline wheel/sdist, isolated install/examples — PASS |
+| `make docs`, `git diff --check` | Strict build и diff check — PASS |
+
+Subsets пересекаются; counts не складываются. Пять прежних SWIG deprecation
+warnings в main/non-DB integration не подавлялись. Повторный review по
+`structuraguard-review`/security checklist не выявил новых существенных findings
+в исправленных путях: режим защищён до terminal, finally освобождает резервирование,
+подтверждённый commit не понижается, неизвестные counts не фабрикуются.
+Остаются прежние ограничения host artifact retention, OS sandbox, полного
+crash recovery и cross-run resume; эти исправления не расширяют scope M15.
+
+## M15 — документация подтверждённого SDK orchestrator {#m15-docs-checks}
+
+**Реализован и проверен ограниченный по объёму copy-only source→report pipeline.**
+Это не объявление всех требований полного ТЗ завершёнными. Канонический scope —
+[M15 ТЗ][spec-m15-current]; конкретные границы и API — в
+[руководстве](../sdk-orchestrator.md), девять критериев и tests — в
+[матрице приёмки](../plans/M15_acceptance.md). Долгоживущее решение о composition,
+владении run и fingerprint reuse принято в [ADR 0034](../adr/0034-sdk-orchestrator.md).
+Нового архитектурного решения в документационной задаче нет.
+
+Подтверждены typed async/sync facades, отдельные technical/semantic stages,
+ParsePlan validation/replay, normalized profile, DB inspection, deterministic/LLM
+mapping, M11/M12 gates и явный M13 staging/load. `ingest`, `execute`, `analyze`
+возвращают полный либо частичный `IngestResult`; пошаговый отказ даёт
+`PipelineError.result`. Source leases принадлежат одному SDK, hooks последовательны,
+states проверяются. Sync API отклоняет активный event loop до создания coroutine;
+контекст сохраняет один Runner и освобождает собственные leases.
+
+`dry_run=True` не вызывает staging writer/loader и возвращает отдельный прогноз.
+Source classification, request-bound scanner и pre-load gate сохраняют политику;
+LLM не получает DB/tools authority. Отмена/timeout не запускают DML retry.
+COMMITTED, ROLLED_BACK и UNKNOWN различаются. Saved ParsePlan проходит replay,
+MappingPlan требует точный normalized fingerprint; новые bytes/новый run не дают
+автоматического reuse. Hash и security summary не заменяют разрешение на запись.
+
+[Security review](../plans/M15_security_review.md) закрыл High с потерей credential
+field hints перед cloud route и Low с пропуском tree/cell metadata. Двенадцать
+regression cases проходят без внешних LLM. После этих runtime fixes выполнены
+`make test` — 4656 passed, `make test-database` — 442 passed,
+`make test-security` — 1413 passed, `make test-integration` — 30 passed;
+lint/typecheck, packaging, strict docs и diff check — PASS. Это результаты
+предыдущего security шага; проверки документационного изменения приведены ниже.
+
+Обновлены русские docstring facades, runtime DTO, composition ports и результата:
+параметры, результат, ошибки, I/O, lifecycle и security semantics. Два копируемых
+async/sync примера извлекаются из Markdown, выполняют CSV→profile без БД/LLM
+и проверяют `records=2` с запретом сетевых соединений. Руководство ссылается на
+канонические §6/7/20/23/24/25; текст ТЗ не копируется. Исполняемая логика SDK
+этим документационным шагом не менялась.
+
+Остаются ограничения: snapshots в памяти с default 4 MiB/1000 batches/1000 records;
+нет spill, URL/path transport, OS sandbox backend, автоматического cross-run resume
+и generated PK propagation. Изменение normalized values перед M13 load отклоняется
+`DRY_RUN_PROVENANCE_UNVERIFIED`. Production scanner, отдельные DB principals,
+artifact retention, ключи и доставка audit — обязанности host. Полный JSON результата
+чувствителен; logs используют `safe_summary`. Pattern detectors допускают FP/FN.
+Реальные модели, некооперативные CPU callbacks и все crash/network combinations
+не проверены. M16/M17 не объявлены готовыми; версия package остаётся `0.3.0`.
+
+Проверки документационного изменения, 2026-09-13:
+
+```bash
+export UV_CACHE_DIR=/private/tmp/structuraguard-m15-uv-cache
+uv run --locked --no-sync pytest packages/structuraguard/tests/docs/test_m15_example.py -q
+uv run --locked --no-sync pytest packages/structuraguard/tests/docs -q
+uv run --locked --no-sync pytest \
+  packages/structuraguard/tests/unit/pipeline \
+  packages/structuraguard/tests/unit/contracts/test_m15_orchestration.py \
+  packages/structuraguard/tests/unit/test_operations.py \
+  packages/structuraguard/tests/unit/test_facades.py -q
+make lint typecheck docs
+git diff --check
+```
+
+Результаты: **2**, **209** и **270 passed** соответственно; Ruff — 598 files,
+mypy — 594 source files, оба PASS. Strict MkDocs build и локальные ссылки/anchors
+прошли, `git diff --check` — PASS. Проверены русские docstring 58 публичных
+объектов/методов M15; callback-параметры описаны в docstring SDKDependencies.
+Review документационного diff не выявил существенных открытых findings.
+После последней правки Markdown повторены два примера и strict build.
+Полные runtime/PostgreSQL/security suites в документационном шаге не повторялись:
+production logic не менялась, их предыдущий результат указан выше. Доступность
+внешнего GitHub здесь не проверялась; канонические anchors сверены с локальным ТЗ.
+
+[spec-m15-current]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m15-sdk-orchestrator
+
 ## M14 — подготовка к ручному commit и PR
 
 **Частичная поставка подготовлена к ручному commit и PR в `main`; полный M14
@@ -822,7 +994,8 @@ literal — regression canary. Повторный review существенны�
 ## Текущая версия и milestone
 
 - Версия package: `0.3.0`.
-- Текущий milestone: `M10 — LLM Semantic DB Mapper`; подтверждённый scope описан выше.
+- Текущий milestone: `M15 — SDK Orchestrator`; подтверждённый scope и ограничения
+  описаны в [актуальном состоянии M15](#m15-docs-checks).
 - `M7 — Database Inspector`: реализованы SQLite adapter и
   normalization A, PostgreSQL reflection B, canonical fingerprint/FK graph C.
   Подтверждённый scope: [API и примеры](../database-inspection.md),
@@ -830,7 +1003,7 @@ literal — regression canary. Повторный review существенны�
 - `M5 — Structural Profiler и deterministic ParsePlan`:
   A (`StructuralProfiler`), B (`DeterministicStructureAnalyzer`) и C
   (`ParsePlanValidator`/`ParsePlanExecutor`) реализованы в пределах закрытой policy.
-- Активная ветка на 2026-09-11: `feat/m10-llm-database-mapping`, HEAD `1b12f55`.
+- Историческая ветка на 2026-09-11: `feat/m10-llm-database-mapping`, HEAD `1b12f55`.
   M10 находится в рабочем diff; commit/push/PR в этой задаче не выполнялись.
   Версия package не повышалась.
 - Исторические checklist, состав diff, команды и незакрытые пункты передачи M5:
@@ -855,7 +1028,8 @@ literal — regression canary. Повторный review существенны�
 в [документации M8](../normalized-profiling.md).
 Для предыдущего M7: [§9 — анализ целевой БД][spec-database] и
 [M7 — Database Inspector][spec-m7]. DB mapping доступен отдельными M9/M10 API;
-общая SDK facade и выполнение MappingPlan не объявлены готовыми.
+общая SDK facade подключена в M15, выполнение MappingPlan использует M13 loader
+в ограниченном scope [руководства](../sdk-orchestrator.md).
 
 ## Состояние milestones
 
@@ -898,7 +1072,12 @@ literal — regression canary. Повторный review существенны�
 - `M9` — реализован Deterministic DB Mapper в [документированном scope](../deterministic-mapping.md).
 - `M10` — реализованы semantic proposals и policy/confidence layer;
   ограничения и подтверждение поведения перечислены выше.
-- `M11`–`M17` — не объявлены реализованными в текущем milestone.
+- `M11` — MappingPlan validation; `M12` — отдельные validation layers;
+  подтверждённые границы описаны в разделах этих milestones выше.
+- `M13` и `M14` — частичные поставки; прежние незакрытые критерии не объявляются
+  выполненными только из-за подключения coordinator.
+- `M15` — bounded copy-only composition и typed SDK; [scope](#m15-docs-checks).
+- `M16`–`M17` — не объявлены реализованными.
 
 ## Подтверждённое поведение M7
 
@@ -1500,7 +1679,7 @@ fix; агент commit/push/PR не выполнял. Открытые AC и rel
 - [ADR 0017](../adr/0017-canonical-catalog-and-dependency-graph.md) — явная
   projection catalog-v1, version gate, pure fingerprint и FK/SCC algorithms.
 
-## Следующий рекомендуемый шаг
+## Исторический следующий шаг M7
 
 Перед передачей текущего M7 diff проверить [план](../plans/M07_database_inspector.md),
 [матрицу приёмки](../plans/M07_acceptance.md) и [security review](../plans/M07_security_review.md).

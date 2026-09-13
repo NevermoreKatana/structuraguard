@@ -6,6 +6,7 @@ from typing import cast as _cast
 
 if _typing.TYPE_CHECKING:
     from .config import SDKConfig
+    from .contracts.orchestration import IngestResult
     from .exceptions import (
         DatabaseInspectionError,
         LoadError,
@@ -23,6 +24,7 @@ if _typing.TYPE_CHECKING:
 __all__ = (
     "AsyncStructuraGuard",
     "DatabaseInspectionError",
+    "IngestResult",
     "LoadError",
     "MappingError",
     "OperationNotImplementedError",
@@ -38,6 +40,7 @@ __all__ = (
 _EXPORT_MODULES = (
     ("AsyncStructuraGuard", "structuraguard.sdk"),
     ("DatabaseInspectionError", "structuraguard.exceptions"),
+    ("IngestResult", "structuraguard.contracts.orchestration"),
     ("LoadError", "structuraguard.exceptions"),
     ("MappingError", "structuraguard.exceptions"),
     ("OperationNotImplementedError", "structuraguard.exceptions"),

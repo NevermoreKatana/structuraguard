@@ -1,178 +1,285 @@
-"""Асинхронный публичный facade StructuraGuard."""
+"""Асинхронный typed facade; dependencies подключаются явно и без import-time I/O."""
 
-from typing import Never
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Never
 
 from .config import SDKConfig
+from .contracts.common import LoadOperation
 from .exceptions import OperationNotImplementedError
 from .parsers import ParserRegistry
 
+if TYPE_CHECKING:
+    from .contracts.database import DatabaseCatalog
+    from .contracts.mapping import MappingPlan, MappingPlanValidationResult
+    from .contracts.mapping_validation import MappingPlanInputReport
+    from .contracts.orchestration import IngestResult
+    from .contracts.parsing import ParsePlan, ParsePlanValidationResult
+    from .contracts.profiling import NormalizedDataProfile
+    from .pipeline.composition import SDKDependencies
+    from .pipeline.mapping import MappingProposal
+    from .pipeline.orchestrator import Orchestrator
+    from .pipeline.source import NormalizedData, SourceAnalysis, SourceRequest
+    from .structure.hybrid import HybridAnalysis
+
 
 class AsyncStructuraGuard:
-    """Основная асинхронная точка входа SDK.
+    """Асинхронный SDK с явными зависимостями и проверяемыми этапами импорта.
 
-    Args:
-        config: Явная неизменяемая конфигурация. Если значение не передано,
-            создаётся отдельный ``SDKConfig`` для этого экземпляра.
-        parser_registry: Явно собранный instance-local parser registry. Если
-            значение не передано, создаётся отдельный пустой registry. Переданный
-            объект сохраняется без копирования.
+    Параметры конструктора: ``config`` сохраняет конфигурацию SDK;
+    ``parser_registry`` задаёт реестр этого экземпляра; ``dependencies`` задаёт
+    политики, адаптеры и фабрики ресурсов каждого запуска. Пустой реестр
+    не обнаруживает плагины; политика по умолчанию запрещает parsing.
+    Конструктор не выполняет I/O и не читает окружение.
 
-    Создание facade не читает переменные окружения, не создаёт event loop или
-    thread и не выполняет файловый либо сетевой I/O. Pipeline пока не реализован,
-    поэтому его операции завершаются ``OperationNotImplementedError``.
-    Discovery plugins автоматически не запускается. Зарегистрированные вручную
-    parsers выполняются in-process и должны быть доверенными.
+    Пошаговые методы требуют собственный открытый SourceAnalysis. Чужой,
+    закрытый, занятый или завершённый запуск отклоняется StructuraGuardError.
+    Ошибка обработки даёт PipelineError с частичным ``result``; конечные
+    операции возвращают IngestResult. Отмена сохраняет CancelledError,
+    кроме отмены после подтверждённого commit: факт записи остаётся в результате.
+    Deadline и лимиты действуют на весь запуск, повторов DML фасад не делает.
+
+    Приложение закрывает свои DB/LLM clients и SourceStream. Lease пошагового
+    источника нужно закрыть через ``async with source`` или ``source.aclose()``.
+    Полные DTO могут содержать PII; для журналирования результата предназначен
+    ``IngestResult.safe_summary()``.
     """
-
-    __slots__ = ("_config", "_parsers")
 
     def __init__(
         self,
         *,
         config: SDKConfig | None = None,
         parser_registry: ParserRegistry | None = None,
+        dependencies: SDKDependencies | None = None,
     ) -> None:
         self._config = config if config is not None else SDKConfig()
         self._parsers = (
             parser_registry if parser_registry is not None else ParserRegistry()
         )
+        self._dependencies = dependencies
+        self._orchestrator: Orchestrator | None = None
 
     @property
     def config(self) -> SDKConfig:
-        """Вернуть instance-local ``SDKConfig``, переданный при создании."""
-
+        """Вернуть ту же явную immutable конфигурацию."""
         return self._config
 
     @property
     def parsers(self) -> ParserRegistry:
-        """Вернуть тот же instance-local registry technical parsers.
-
-        Registry можно собирать вручную или через явный discovery до открытия
-        parser session; во время active session его изменение запрещено.
-        """
-
+        """Вернуть реестр этого экземпляра без копирования и автопоиска plugins."""
         return self._parsers
 
-    async def inspect_source(self, *args: object, **kwargs: object) -> Never:
-        """Отклонить пока не реализованную операцию ``inspect_source``.
+    def _engine(self) -> Orchestrator:
+        from .pipeline.composition import SDKDependencies
+        from .pipeline.orchestrator import Orchestrator
 
-        Args:
-            *args: Позиционные аргументы, которые пока не интерпретируются.
-            **kwargs: Именованные аргументы, которые пока не интерпретируются.
+        if self._orchestrator is None:
+            self._orchestrator = Orchestrator(
+                self._dependencies or SDKDependencies(), self._parsers
+            )
+        return self._orchestrator
 
-        Raises:
-            OperationNotImplementedError: Всегда при ожидании результата.
+    async def inspect_source(self, source: SourceRequest) -> SourceAnalysis:
+        """Прочитать SourceRequest и вернуть физический snapshot SourceAnalysis.
 
-        Метод не возвращает результат и не выполняет I/O.
+        Читает ``source.stream`` в пределах лимитов, применяет security gate,
+        определяет формат и вызывает technical parser. Путь/URL из metadata
+        не открывает; семантический разбор, LLM и БД здесь не вызываются.
+        Отказ gate/parser или timeout даёт PipelineError; отмена распространяется.
+        При успехе caller закрывает lease, но сохраняет владение transport.
         """
+        return await self._engine().inspect_source(source)
 
-        self._operation_unavailable("inspect_source")
+    async def analyze_structure(
+        self, source: SourceAnalysis, *, saved_plan: ParsePlan | None = None
+    ) -> HybridAnalysis:
+        """Вернуть HybridAnalysis с профилем, draft и причинами review источника.
 
-    async def inspect_database(self, *args: object, **kwargs: object) -> Never:
-        """Отклонить пока не реализованную операцию ``inspect_database``.
-
-        Args:
-            *args: Позиционные аргументы, которые пока не интерпретируются.
-            **kwargs: Именованные аргументы, которые пока не интерпретируются.
-
-        Raises:
-            OperationNotImplementedError: Всегда при ожидании результата.
-
-        Метод не возвращает результат и не выполняет I/O.
+        ``source`` — открытый физический snapshot; ``saved_plan`` проверяется
+        против него через replay. При отсутствии сохранённого плана parsing/LLM
+        policy может разрешить внешний вызов после классификации и scanner gate.
+        Повторный анализ этого lease использует кеш; другой saved_plan даёт
+        PipelineError. Ошибки обработки/deadline также дают PipelineError.
+        Результат анализа не разрешает загрузку в БД.
         """
+        return await self._engine().analyze_structure(source, saved_plan=saved_plan)
 
-        self._operation_unavailable("inspect_database")
+    async def create_parse_plan(
+        self, source: SourceAnalysis, *, structure: HybridAnalysis | None = None
+    ) -> ParsePlan | None:
+        """Получить draft ParsePlan для source либо None, если анализ не дал плана.
 
-    async def create_plan(self, *args: object, **kwargs: object) -> Never:
-        """Отклонить пока не реализованную операцию ``create_plan``.
-
-        Args:
-            *args: Позиционные аргументы, которые пока не интерпретируются.
-            **kwargs: Именованные аргументы, которые пока не интерпретируются.
-
-        Raises:
-            OperationNotImplementedError: Всегда при ожидании результата.
-
-        Метод не возвращает результат и не выполняет I/O.
+        ``structure`` должен совпадать с анализом этого lease, иначе возникает
+        PipelineError. Если анализа ещё нет, выполняется analyze_structure
+        с его политиками и возможным LLM I/O. Причины отсутствия плана доступны
+        в HybridAnalysis. Draft не заменяет validation перед semantic execution;
+        БД не вызывается. Отказы обработки/deadline дают PipelineError.
         """
+        return await self._engine().create_parse_plan(source, structure=structure)
 
-        self._operation_unavailable("create_plan")
+    async def validate_parse_plan(
+        self, source: SourceAnalysis, *, plan: ParsePlan
+    ) -> ParsePlanValidationResult:
+        """Проверить недоверенный plan против полного физического source snapshot.
 
-    async def validate_plan(self, *args: object, **kwargs: object) -> Never:
-        """Отклонить пока не реализованную операцию ``validate_plan``.
-
-        Args:
-            *args: Позиционные аргументы, которые пока не интерпретируются.
-            **kwargs: Именованные аргументы, которые пока не интерпретируются.
-
-        Raises:
-            OperationNotImplementedError: Всегда при ожидании результата.
-
-        Метод не возвращает результат и не выполняет I/O.
+        Возвращает ParsePlanValidationResult с decision/issues и необязательным
+        validated_plan. При первом вызове анализ использует этот saved plan;
+        новый план через LLM не генерируется. БД не вызывается. Невалидный план
+        описывается в отчёте; отказ стадии/deadline даёт PipelineError.
+        Чужой или закрытый lease отклоняется StructuraGuardError.
         """
+        return await self._engine().validate_parse_plan(source, plan=plan)
 
-        self._operation_unavailable("validate_plan")
+    async def parse_semantically(
+        self, source: SourceAnalysis, *, plan: ParsePlan
+    ) -> NormalizedData:
+        """Применить plan к source после validation и вернуть NormalizedData.
 
-    async def execute(self, *args: object, **kwargs: object) -> Never:
-        """Отклонить пока не реализованную операцию ``execute``.
-
-        Args:
-            *args: Позиционные аргументы, которые пока не интерпретируются.
-            **kwargs: Именованные аргументы, которые пока не интерпретируются.
-
-        Raises:
-            OperationNotImplementedError: Всегда при ожидании результата.
-
-        Метод не возвращает результат и не выполняет I/O.
+        Повторно проверяет ParsePlan и читает semantic iterator до terminal batch
+        в пределах общего бюджета. Результат содержит batches, manifest, report
+        и связь с исходным lease; это отдельный этап после technical parsing.
+        Preview, неоднозначность, отказ validation или deadline дают PipelineError.
+        Отмена распространяется; этот метод не выполняет DB operations.
         """
+        return await self._engine().parse_semantically(source, plan=plan)
 
-        self._operation_unavailable("execute")
+    async def profile_records(self, source: NormalizedData) -> NormalizedDataProfile:
+        """Вернуть NormalizedDataProfile для подтверждённого source snapshot.
 
-    async def analyze(self, *args: object, **kwargs: object) -> Never:
-        """Отклонить пока не реализованную операцию ``analyze``.
-
-        Args:
-            *args: Позиционные аргументы, которые пока не интерпретируются.
-            **kwargs: Именованные аргументы, которые пока не интерпретируются.
-
-        Raises:
-            OperationNotImplementedError: Всегда при ожидании результата.
-
-        Метод не возвращает результат и не выполняет I/O.
+        Проверяет lineage NormalizedData; кеш действует только для этого lease
+        и точного normalized fingerprint. LLM и БД не вызываются. Несовпадение
+        binding или отказ профилирования/deadline даёт PipelineError;
+        чужой/закрытый lease — StructuraGuardError. Полный профиль чувствителен.
         """
+        return await self._engine().profile_records(source)
 
-        self._operation_unavailable("analyze")
+    async def inspect_database(
+        self, *, source: NormalizedData | None = None
+    ) -> DatabaseCatalog:
+        """Прочитать свежий DatabaseCatalog через внедрённый DB inspector.
 
-    async def ingest(self, *args: object, **kwargs: object) -> Never:
-        """Отклонить пока не реализованную операцию ``ingest``.
-
-        Args:
-            *args: Позиционные аргументы, которые пока не интерпретируются.
-            **kwargs: Именованные аргументы, которые пока не интерпретируются.
-
-        Raises:
-            OperationNotImplementedError: Всегда при ожидании результата.
-
-        Метод не возвращает результат и не выполняет I/O.
+        ``source`` связывает inspection с нормализованным snapshot и сначала
+        обеспечивает его профиль; без source создаётся отдельный конечный run.
+        Выполняет read-only DB I/O в разрешённом scope без DDL/DML.
+        Отсутствующая database factory, неверный target, ошибка adapter или
+        deadline дают PipelineError. Отмена распространяется; clients закрывает host.
         """
+        return await self._engine().inspect_database(source=source)
 
-        self._operation_unavailable("ingest")
+    async def create_mapping_plan(
+        self,
+        source: NormalizedData,
+        *,
+        database: DatabaseCatalog | None = None,
+        operation: LoadOperation = LoadOperation.INSERT_ONLY,
+    ) -> MappingProposal:
+        """Вернуть MappingProposal для нормализованного source и целевого каталога.
+
+        Обеспечивает профиль и inspection; ``database``, если задан, должен
+        совпадать с каталогом run. ``operation`` задаёт операцию нового плана.
+        Детерминированный выбор дополняется LLM только по явной policy после
+        scanner gate; записи в БД нет. Неполное/неоднозначное покрытие даёт
+        proposal без plan, а отказы gate/adapter/deadline — PipelineError.
+        """
+        return await self._engine().create_mapping_plan(
+            source, database=database, operation=operation
+        )
+
+    async def validate_mapping_plan(
+        self,
+        source: NormalizedData,
+        *,
+        plan: MappingPlan,
+        database: DatabaseCatalog | None = None,
+    ) -> MappingPlanValidationResult | MappingPlanInputReport:
+        """Проверить plan по точному source fingerprint, профилю и DB scope.
+
+        ``database`` должен совпадать с каталогом run; при его отсутствии
+        используется уже полученный каталог либо выполняется read-only inspection.
+        Возвращает MappingPlanValidationResult или MappingPlanInputReport при
+        отклонённом входе, не вызывает LLM и не пишет в target. Отказ стадии
+        или deadline даёт PipelineError. Успешный отчёт не отменяет повторные
+        schema/grants checks загрузчика перед DML и COMMIT.
+        """
+        return await self._engine().validate_mapping_plan(
+            source, plan=plan, database=database
+        )
+
+    async def execute(
+        self,
+        source: NormalizedData,
+        *,
+        plan: MappingPlan,
+        dry_run: bool = False,
+        idempotency_key: str | None = None,
+    ) -> IngestResult:
+        """Проверить source/plan и вернуть IngestResult после dry-run либо загрузки.
+
+        ``source`` — живой NormalizedData; ``plan`` повторно проходит M11 до
+        проверки records и pre-load security gate. ``dry_run=True`` выполняет
+        read-only прогноз без staging writer/loader. При False нужны внедрённые
+        loader, staging и references; возможна транзакционная запись в target.
+        ``idempotency_key`` передаётся ledger policy; автоматического DML retry нет.
+
+        Ошибки обработки/review сохраняются в частичном результате. Неверный lease
+        даёт StructuraGuardError; CancelledError до commit распространяется.
+        UNKNOWN не означает rollback. Метод завершает run, но lease закрывает caller.
+        """
+        return await self._engine().execute(
+            source, plan=plan, dry_run=dry_run, idempotency_key=idempotency_key
+        )
+
+    async def ingest(
+        self,
+        source: SourceRequest,
+        *,
+        dry_run: bool = False,
+        parse_plan: ParsePlan | None = None,
+        mapping_plan: MappingPlan | None = None,
+        operation: LoadOperation = LoadOperation.INSERT_ONLY,
+        idempotency_key: str | None = None,
+    ) -> IngestResult:
+        """Выполнить source→report и вернуть полный либо частичный IngestResult.
+
+        Читает SourceRequest; ``parse_plan``/``mapping_plan`` используются только
+        после проверки fingerprints. ``operation`` влияет на создаваемый mapping;
+        у сохранённого плана действует его собственная операция.
+        ``dry_run=True`` исключает staging writer и target writes; False разрешает
+        загрузку через явно внедрённые adapters после всех gates.
+        ``idempotency_key`` относится к loader ledger, а не к кешу ingest.
+
+        Возможны source/LLM/DB I/O согласно policy. Ошибки обработки и review
+        возвращаются в результате; ошибки конфигурации/admission могут возникнуть
+        как исключения. CancelledError до commit распространяется. Собственный
+        lease закрывается, transport/clients остаются у host; DML не повторяется.
+        """
+        return await self._engine().ingest(
+            source,
+            dry_run=dry_run,
+            parse_plan=parse_plan,
+            mapping_plan=mapping_plan,
+            operation=operation,
+            idempotency_key=idempotency_key,
+        )
+
+    async def analyze(self, source: SourceRequest) -> IngestResult:
+        """Вернуть IngestResult анализа SourceRequest до предложения MappingPlan.
+
+        Выполняет source/semantic analysis, профиль, read-only inspection и mapping
+        по тем же policy, что ingest; LLM возможен только после security gates.
+        Staging, record validation и load здесь не выполняются. Processing failures
+        и review остаются в результате; ошибки admission и CancelledError могут
+        распространяться. Собственный lease закрывается; transport закрывает host.
+        """
+        return await self._engine().analyze(source)
+
+    create_plan = create_mapping_plan
+    validate_plan = validate_mapping_plan
 
     async def propose_schema(self, *args: object, **kwargs: object) -> Never:
-        """Отклонить пока не реализованную операцию ``propose_schema``.
+        """Отклонить любые args/kwargs без I/O и генерации схемы.
 
-        Args:
-            *args: Позиционные аргументы, которые пока не интерпретируются.
-            **kwargs: Именованные аргументы, которые пока не интерпретируются.
-
-        Raises:
-            OperationNotImplementedError: Всегда при ожидании результата.
-
-        Метод не возвращает результат и не выполняет I/O.
+        Всегда поднимает OperationNotImplementedError с кодом
+        SDK_OPERATION_NOT_IMPLEMENTED; DDL не входит в ingest pipeline.
         """
-
-        self._operation_unavailable("propose_schema")
-
-    @staticmethod
-    def _operation_unavailable(operation: str) -> Never:
-        raise OperationNotImplementedError(operation)
+        raise OperationNotImplementedError("propose_schema")
