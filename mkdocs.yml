@@ -53,6 +53,9 @@ nav:
   - JSON Schema validation M12-B: json-schema-validation.md
   - DB constraints и rules M12-C: db-business-validation.md
   - Provenance и ValidationReport M12-D: provenance-validation.md
+  - PostgreSQL staging M13-A: staging.md
+  - PostgreSQL dry-run M13-B: dry_run.md
+  - PostgreSQL loader M13-C/D: loader.md
   - Структурный разбор M5: structure.md
   - LLM providers и routing M6: llm.md
   - LLM semantic parsing M6: llm-semantic-parsing.md
@@ -85,6 +88,10 @@ nav:
       - Локальный JSON Schema профиль: adr/0023-local-json-schema-validation.md
       - Deterministic DB constraints и DSL: adr/0024-deterministic-record-constraints.md
       - Provenance replay и ValidationReport: adr/0025-provenance-replay-and-validation-report.md
+      - PostgreSQL staging lifecycle: adr/0026-staging-and-loader-transactions.md
+      - Read-only dry-run planning: adr/0027-read-only-dry-run-planning.md
+      - Atomic PostgreSQL loader: adr/0028-atomic-postgresql-insert-upsert.md
+      - Ledger и quarantine: adr/0029-loader-ledger-and-quarantine.md
   - Планы:
       - Приёмка M12-C constraints: plans/M12_C_constraints_acceptance.md
       - M00 — требования: plans/M00_requirements.md
@@ -117,3 +124,5 @@ nav:
       - M12-A — приёмка scalar normalizers: plans/M12_A_normalizers_acceptance.md
       - M12-B — приёмка schema validator: plans/M12_B_schema_acceptance.md
       - M12-D — приёмка provenance/report: plans/M12_D_provenance_acceptance.md
+      - M13 — аудит приёмки: plans/M13_acceptance.md
+      - M13 — security review: plans/M13_security_review.md

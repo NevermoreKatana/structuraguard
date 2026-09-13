@@ -15,7 +15,7 @@ from structuraguard.ports.semantic import (
     SemanticStructureAnalyzer,
     StructuralProfiler,
 )
-from structuraguard.ports.stores import AuditStore, StagingStore
+from structuraguard.ports.stores import AuditStore, RunStagingStore, StagingStore
 from structuraguard.ports.validation import ConstraintReader
 
 __all__ = (
@@ -33,6 +33,7 @@ __all__ = (
     "ParsePlanValidator",
     "Parser",
     "ProvenanceValidator",
+    "RunStagingStore",
     "SecurityScanner",
     "SemanticStructureAnalyzer",
     "StagingStore",

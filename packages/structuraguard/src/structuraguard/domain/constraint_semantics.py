@@ -66,7 +66,14 @@ def key_columns_supported(
             allowed = (
                 {"BINARY"}
                 if dialect == "sqlite"
-                else {"pg_catalog.C", "pg_catalog.POSIX", "C", "POSIX"}
+                else {
+                    "pg_catalog.C",
+                    "pg_catalog.POSIX",
+                    'pg_catalog."C"',
+                    'pg_catalog."POSIX"',
+                    "C",
+                    "POSIX",
+                }
             )
             if not collations or not collations <= allowed:
                 return False

@@ -10,12 +10,18 @@ M11: [MappingPlanValidator, полный отчёт и policy](mapping-plan-vali
 M12: [NormalizerRegistry](normalization.md), [JsonSchemaValidator](json-schema-validation.md),
 [DB constraints и business rules](db-business-validation.md),
 [ProvenanceValidator и ValidationReportBuilder](provenance-validation.md).
+M13: [staging и явный bootstrap](staging.md), [read-only dry-run](dry_run.md),
+[PostgreSQLLoader, atomic/quarantine и durable replay](loader.md).
 Общая SDK facade пока не реализует LLM orchestration.
 
 Статус: подтверждённое поведение package `structuraguard` версии `0.3.0` в
 текущей реализации M4, M5-A/B/C, bounded M6-A/B/C/D, M7, M8, M9, M10, M11 и standalone M12 A–D в
-scope соответствующих руководств. Facade-операции pipeline и DB loader
-в эту поставку не входят; M11 вызывается как отдельный сервис проверки.
+scope соответствующих руководств, а также отдельные PostgreSQL API M13 A–D.
+Facade-операции pipeline остаются незавершёнными; M11 вызывается как отдельный сервис.
+M13 не реализует общий `ingest`, coordinator всех validation layers и
+DB-generated PK. `DatabaseAdapter.execute` остаётся заглушкой; запись доступна
+через явный `PostgreSQLLoader`. Полный milestone принят частично:
+[матрица M13](plans/M13_acceptance.md).
 
 M12 пока не предоставляет общего coordinator: caller готовит projection для JSON
 Schema/DB/rules, выбирает trusted policy и связывает layer results с provenance.

@@ -4,6 +4,15 @@ StructuraGuard — встраиваемая Python-библиотека для �
 разнородных данных в существующие реляционные БД. Основной API асинхронный, а
 sync API предоставляется отдельной facade.
 
+## PostgreSQL staging и loader M13
+
+Доступны отдельные [staging API с явным bootstrap](staging.md),
+[dry-run без записи в БД](dry_run.md) и [insert/upsert loader](loader.md).
+Loader поддерживает atomic transaction, явный quarantine и ledger для durable
+idempotency. Общий `ingest`, coordinator всех validation layers и DB-generated PK
+пока отсутствуют; M13 принят частично. Границы подтверждены
+[матрицей приёмки](plans/M13_acceptance.md) и [security review](plans/M13_security_review.md).
+
 ## Нормализация и проверки M12
 
 Доступны отдельные сервисы: [conservative scalar normalization](normalization.md),

@@ -21,7 +21,7 @@
 | MappingPlan validator | 14.1, 16, 18, 20.3–20.4, M11 |
 | LLM Semantic DB Mapper | 10, 11.8–11.9, 12, 14, 19.5–19.6, 20.2, 20.10–20.11, M10 |
 | Validation engine | 15–16 |
-| Staging/loader | 17–18, 20.3–20.4, M11 |
+| Staging/loader | 17–18, 20.3–20.4, M13 |
 | Security | 20, 30.4, 32.5, M12 |
 | Demo application | 2, 23, 28, M13 |
 | Evaluation | 30–33, M14 |

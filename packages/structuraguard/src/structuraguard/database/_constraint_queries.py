@@ -117,6 +117,7 @@ def _relation(table: TableCatalog, column_ids: tuple[str, ...]) -> Table:
         Column,
         Date,
         DateTime,
+        Float,
         MetaData,
         Numeric,
         String,
@@ -133,6 +134,7 @@ def _relation(table: TableCatalog, column_ids: tuple[str, ...]) -> Table:
         sql_types: dict[str, TypeEngine[Any]] = {
             "integer": BigInteger(),
             "decimal": Numeric(),
+            "float": Float(precision=53),
             "boolean": Boolean(),
             "date": Date(),
             "datetime": DateTime(timezone=True),

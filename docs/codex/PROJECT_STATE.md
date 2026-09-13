@@ -2,6 +2,128 @@
 
 Обновлено: 2026-09-13.
 
+## M13 — подготовка к ручному commit и PR
+
+Самостоятельные PostgreSQL API A–D готовы к отдельному PR в `main`; **полный M13
+остаётся частичным**. В плане отмечены AC-03/04/06/07 в подтверждённом bounded
+scope; AC-01/02/05 открыты: required M12 coordinator, legacy LoadReport bridge
+и успешный DB-generated PK insert/replay не поставлены. Новых существенных
+findings при повторном review нет; последний Medium staging finalize/recovery
+закрыт regression tests, описанными ниже.
+
+После последнего runtime-исправления повторены полные доступные gates:
+`make test` — **3871 passed**, `make test-database` — **388 passed** на PostgreSQL
+16/18, `make test-integration` — **30 passed**, `make test-security` — **959 passed**.
+`make lint` (505 файлов), `make typecheck` (501 файл), offline `make test-build`,
+`make lock-check`, strict `make docs` и `git diff --check` — PASS.
+Семь Python примеров проверены в PostgreSQL suite, документационные тесты —
+в основном suite. Платные LLM API не использовались.
+
+Проверены все 73 изменённых файла (14 tracked modified и 59 untracked);
+обнаруженных secrets/debug artifacts/случайных generated files нет.
+Build outputs и caches ignored; индекс пуст. Ветка `feat/m13-staging-loader`,
+локальные `main` и HEAD совпадают. В этом шаге изменены только план и этот state;
+commit и PR не создавались. Checklist, фактические команды, объяснение начального
+сбоя sandbox lock-check и причины непроверенных сценариев — в
+[плане M13](../plans/M13_staging_loader.md#m13-commit-readiness).
+Процессные crash/network ACK, полная конкурентная DDL/FK матрица, production
+performance, другие Python/OS и актуальный удалённый `main` здесь не проверены.
+
+## M13 — исправление finding финального review
+
+Закрыт Medium: `RuntimeError` из staging finalize либо чтения staging при ledger
+recovery больше не скрывает подтверждённый COMMIT. Loader сохраняет committed
+result/replay и возвращает `LOAD_STAGING_FINALIZE_FAILED`; текст backend error
+не попадает в result/audit/logs. После восстановления store повтор по тому же
+key завершает staging без повторного target DML или audit INSERT.
+
+Production-правка — добавление `RuntimeError` в два существующих обработчика:
+`loading/staged_input.py::finish_staging` и `database/loader.py::_recover_staging`.
+Сравнение AST подтвердило неизменность сигнатур и остальной логики. API, scope,
+обработка cancellation и архитектурные решения сохранены.
+
+Regression tests: расширен `test_commit_remains_committed_when_staging_finalize_fails`
+и добавлены `test_runtime_finalize_failure_preserves_commit_and_allows_ledger_recovery`,
+`test_runtime_staging_read_failure_preserves_committed_ledger_replay`.
+До исправления: 6 failed / 2 passed; после: 8 passed на PostgreSQL 16/18.
+Совместный прогон `test_postgresql_loader.py`, `test_postgresql_load_outcomes.py`
+и `test_postgresql_load_acceptance.py` с SAWarning как ошибкой — **144 passed**.
+Локальные loading/stores unit/contract/security и import smoke — **57 passed**.
+`make lint` (505 файлов), `make typecheck` (501 файл), `make docs` и
+`git diff --check` — PASS. Платные LLM API не использовались.
+
+Повторный review нового diff не выявил существенных findings. Полные проектные
+suites после этой локальной правки не повторялись; ограничения полного M13
+из [матрицы приёмки](../plans/M13_acceptance.md) остаются открытыми.
+
+## M13 — документация подтверждённых PostgreSQL API
+
+Поставлены отдельные bounded API A–D:
+[staging lifecycle и явный bootstrap](../staging.md),
+[read-only execution plan](../dry_run.md),
+[insert_only/upsert, atomic/quarantine и durable replay](../loader.md).
+Обновлены обзор API, главная страница, навигация и индекс ТЗ. Публичные русские
+docstring описывают параметры, результаты, исключения, I/O и security semantics.
+Руководства ссылаются на канонические [§17–18, §20.3–20.4 и M13 ТЗ][spec-m13];
+текст требований не копируется. Решения уже закреплены ADR 0026–0029,
+новых архитектурных решений и ADR в этом документационном шаге нет.
+
+Уточнены границы: dry-run вообще не обращается к staging; PostgreSQL store
+сохраняет только metadata/refs; bootstrap и maintenance отделены от writer.
+При UNKNOWN допустимо восстановление по committed marker того же key/binding,
+но отсутствие marker не разрешает DML из UNKNOWN/EXECUTING. Ошибка до staging CAS
+не означает смену status, а подтверждённый COMMIT со сбоем finalize остаётся
+committed result с warning. Полный JSON и Pydantic validation errors могут
+содержать чувствительный вход; для logs используются закрытые codes и safe_summary.
+
+Семь Python примеров извлекаются непосредственно из Markdown и импортируются
+по отдельности. Test fixtures подготавливают синтетические snapshot/policies
+и локальную БД; сами примеры не зависят от test helpers и не содержат credentials.
+
+| Пример | Наблюдаемая проверка |
+|---|---|
+| Staging bootstrap и begin/stage/seal | `test_staging_documentation_creates_sealed_metadata`: совместимый повтор bootstrap, SEALED run, counts и refs после повторного открытия store |
+| Dry-run, loader и ledger policy | `test_documented_preview_load_and_durable_replay`: atomic upsert и явный quarantine; target/staging/ledger/sequence snapshots до и после preview совпадают; INSERT/UPDATE и replay без повторного DML/audit |
+| Ledger bootstrap | Тот же тест: административная проверка заранее установленной ledger schema |
+| Server-value permission | `test_documented_server_permission_supports_only_explicit_load`: stored generated non-key column вычисляется только при разрешённой записи, dry-run остаётся blocked и не меняет БД |
+
+Все примеры проверяет
+`packages/structuraguard/tests/integration/database/test_m13_documentation_examples.py`.
+Фактические проверки этого документационного шага (Python 3.12.9):
+
+| Команда | Результат |
+|---|---|
+| `uv run --locked --no-sync pytest -q -W error::sqlalchemy.exc.SAWarning -m database_integration packages/structuraguard/tests/integration/database/test_m13_documentation_examples.py` | 8 passed, PostgreSQL 16/18; семь примеров, atomic/quarantine parameterization |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/docs` | 137 passed |
+| `uv run --locked --no-sync pytest -q packages/structuraguard/tests/unit/loading packages/structuraguard/tests/contract/stores packages/structuraguard/tests/contract/loading packages/structuraguard/tests/smoke/test_import_side_effects.py` | 33 passed |
+| `make lint` | Ruff: 505 файлов, без замечаний |
+| `make typecheck` | Mypy: 501 файл, без ошибок |
+| `make docs` | Strict MkDocs build и внутренние ссылки — PASS |
+| Сравнение AST до/после без docstring | Исполняемый AST всех 203 production modules неизменён |
+| `git diff --check` | PASS |
+
+В первом прогоне нового PG теста неверно вызван async helper `Database.sql`;
+исправлен только тест, без ослабления assertions/typecheck. Финальный прогон
+с независимым импортом каждого примера — 8 passed. Сеть использовалась только
+для локальных PostgreSQL fixtures; платные LLM API не вызывались.
+
+Последние **runtime** gates выполнены в предшествующем
+[security review M13](../plans/M13_security_review.md): 3871 main, 374 PostgreSQL,
+30 integration и 959 security tests passed; strict docs и offline wheel/sdist
+проверены. Полные runtime/security/build suites в документационном шаге не
+повторялись: production-изменения ограничены docstring. CI на других Python/OS
+и внешняя доступность GitHub ссылок этим шагом не проверялись; anchors сверены
+с локальным каноническим ТЗ.
+
+Полный M13 остаётся **частичным** по [матрице приёмки](../plans/M13_acceptance.md).
+Нет общего SDK ingest/coordinator всех ValidationReport layers,
+`LoadReport.would_load_records`, DB-generated PK и его propagation/replay,
+циклических/deferred/two-phase strategies и large-stream execution.
+Подлинность/retention внешних artifacts, изоляция tenants отдельными SQL ролями
+и согласование административных migrations остаются ответственностью deployment.
+
+[spec-m13]: https://github.com/NevermoreKatana/structuraguard/blob/main/StructuraGuard_SDK_Technical_Specification.md#m13-staging-and-loader
+
 ## M12 — исправление import probe на Python 3.13/3.14
 
 Воспроизведено падение CI на Python 3.13.11 и 3.14.2: attribution probe запрещал

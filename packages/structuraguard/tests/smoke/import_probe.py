@@ -671,6 +671,9 @@ def _prepare_attribution_dependencies() -> None:
         "json",
         "math",
         "re",
+        # Database package импортирует stdlib SQLite adapter; прогревается только
+        # зависимость, SDK импортируется заново под теми же строгими guards.
+        "sqlite3",
         # Profiling использует urlsplit; начиная с Python 3.13 pathlib
         # больше не прогревает этот stdlib import до установки guards.
         "urllib.parse",
@@ -689,6 +692,7 @@ def _prepare_attribution_dependencies() -> None:
         "StrictInt",
         "StrictStr",
         "StringConstraints",
+        "TypeAdapter",
         "field_validator",
         "model_validator",
     ):
@@ -719,6 +723,8 @@ def run_probe(mode: str) -> None:
 
     allowed_import_paths = _package_import_paths()
     policy, logger, signals, threads = _install_guards(allowed_import_paths)
+    if resolve_exports:
+        setattr(sys.modules["sqlite3"], "connect", _fail)
     _assert_guards_active(allowed_import_paths)
     module = importlib.import_module("structuraguard")
     if resolve_exports:
@@ -772,6 +778,15 @@ def run_probe(mode: str) -> None:
                 )
             for export_name in exports:
                 getattr(checked_module, export_name)
+        for module_name in (
+            "structuraguard.database.dry_run",
+            "structuraguard.database.loader",
+            "structuraguard.database.ledger",
+            "structuraguard.stores",
+        ):
+            importlib.import_module(module_name)
+        if "sqlalchemy" in sys.modules or "asyncpg" in sys.modules:
+            raise ForbiddenSideEffect("M13 import eagerly loaded optional DB drivers")
     elif "pydantic" in sys.modules:
         raise ForbiddenSideEffect("plain import eagerly loaded Pydantic")
     _assert_snapshots_unchanged(
