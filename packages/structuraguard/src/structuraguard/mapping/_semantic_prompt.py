@@ -38,7 +38,7 @@ def semantic_mapping_prompt() -> LLMPromptTemplate:
             "Each input entities item similarly needs ONE tables choice assessing its candidate_ids. "
             "Each relation_sources ID needs ONE relations choice assessing its relation_candidates. "
             "Never emit a separate choice for an unselected candidate: include it in assessments "
-            "of the SAME source choice with a low score instead. "
+            "of the SAME source choice with its honest semantic score. "
             "Copy group_id and candidate_set_fingerprint exactly. "
             "Select multiple tables for one entity only when supported by supplied complete FK relations. "
             "Select one column per field; respect table membership and all ordered FK pairs. "

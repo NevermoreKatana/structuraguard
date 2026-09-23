@@ -107,6 +107,8 @@ async def test_prompt_separates_source_tasks_from_candidate_options() -> None:
     prompt = semantic_mapping_prompt()
     assert prompt.identity.version == "1.3.0"
     assert "compact SINGLE-LINE JSON" in prompt.text
+    assert "with its honest semantic score" in prompt.text
+    assert "with a low score instead" not in prompt.text
     decision = decision_for(group)
     assert len(decision.columns) == len(payload["fields"]) == 2
     assert (
