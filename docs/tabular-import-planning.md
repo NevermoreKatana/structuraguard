@@ -1,0 +1,60 @@
+# Семантический план табличного импорта
+
+`TabularImportPlanner` составляет проверяемый план перед обычным `ingest`.
+Модель видит исходные заголовки, ограниченную выборку реальных строк и все
+разрешённые изменяемые колонки одной существующей таблицы. Лексического top-k нет:
+`Индекс` со значениями `666333`, `001234` может соответствовать `postal_code`,
+даже если имена написаны на разных языках. Одна длина числа не доказывает смысл.
+
+```python
+from decimal import Decimal
+
+from structuraguard.contracts.semantic_mapping import SemanticMappingContext
+from structuraguard.mapping.tabular import (
+    TabularImportPlanner,
+    tabular_import_prompt,
+    tabular_import_response_schema,
+)
+from structuraguard.mapping.tabular_execution import execute_tabular_import
+
+# При создании provider зарегистрируйте отдельные prompt/schema, возвращаемые
+# tabular_import_prompt() и tabular_import_response_schema(). Router использует
+# LOCAL_ONLY и тот же run_id; scanner — trusted base SecurityScanner.
+planner = TabularImportPlanner(
+    router=router,
+    scanner=scanner,
+    context=SemanticMappingContext(run_id=run_id),
+    min_confidence=Decimal("0.85"),
+)
+plan = await planner.plan(labels=labels, rows=rows, catalog=catalog, scope=scope)
+prepared = execute_tabular_import(labels, rows, catalog, scope, plan)
+# prepared.rows передайте штатному ingest как JSON: проверки MappingPlan,
+# типов, ограничений и транзакционная загрузка остаются обязательными.
+```
+
+Ответ модели содержит только opaque IDs `s0`/`c0`, уверенность, закрытую причину
+и одну из двух операций. `copy` сохраняет значение целиком. `split` делит по
+пробельным символам либо указанному буквальному разделителю: например,
+`Фамилия_имя` → `family_name` и `given_name`. Число частей и их порядок фиксированы,
+все части должны использоваться. SDK проверяет **каждую** строку, включая строки,
+которые не попали в выборку. Недостаток частей, лишняя часть, неизвестный target,
+повторная запись в колонку или уверенность ниже порога отклоняют весь план.
+Никаких произвольных выражений, исправления ответа или генерации значений нет.
+
+`TabularImportPlan` связан fingerprints с исходными строками, каталогом и областью
+разрешённых колонок. `prepared.lineage` показывает исходное поле, целевую колонку,
+операцию и уверенность; `prepared.preview` содержит первые три строки до и после.
+Эти данные чувствительны: обычные логи не должны включать их сериализацию.
+
+Реальные примеры разрешены только при явном `LOCAL_ONLY` и локальном provider.
+Класс данных не ниже `CONFIDENTIAL`, неизвестная metadata сохраняет `RESTRICTED`.
+SDK самостоятельно запрещает выявленные secrets и active content, добавляет
+injection scan и требует exact-bound approval внешнего scanner. Defaults:
+8 равномерно выбранных строк, до 256 символов в ячейке, до 64 исходных/целевых
+колонок и 64 KiB payload. Усечение значения явно отмечается в запросе и не
+меняет исходные строки. Лимиты router, provider и security scanner действуют
+дополнительно; превышение не приводит к скрытому исключению кандидатов.
+
+Первый вариант поддерживает одну целевую таблицу и строковые/NULL ячейки,
+до 5000 строк и 8 MiB snapshot. Он не выполняет SQL, не создаёт таблицы,
+не выводит произвольные преобразования и не заменяет штатную валидацию загрузки.

@@ -50,6 +50,7 @@ nav:
   - Normalized Profiler M8: normalized-profiling.md
   - Deterministic Mapper M9: deterministic-mapping.md
   - Semantic DB Mapper M10: llm-database-mapping.md
+  - Семантический план табличного импорта: tabular-import-planning.md
   - MappingPlan Validator M11: mapping-plan-validation.md
   - Scalar normalization M12-A: normalization.md
   - JSON Schema validation M12-B: json-schema-validation.md
