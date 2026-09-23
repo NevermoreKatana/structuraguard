@@ -172,7 +172,13 @@ class SemanticMappingDecision(SensitiveMappingContract):
     group_id: Token
     candidate_set_fingerprint: FingerprintStr
     tables: Annotated[tuple[SemanticTableChoice, ...], Field(max_length=8)]
-    columns: Annotated[tuple[SemanticChoice, ...], Field(max_length=32)]
+    columns: Annotated[
+        tuple[SemanticChoice, ...],
+        Field(
+            max_length=32,
+            description="Ровно один выбор на fields[].source_id. Все кандидаты этого поля перечисляются внутри его assessments; source_id не повторяется.",
+        ),
+    ]
     relations: Annotated[tuple[SemanticChoice, ...], Field(max_length=32)]
     review_required: StrictBool
 
