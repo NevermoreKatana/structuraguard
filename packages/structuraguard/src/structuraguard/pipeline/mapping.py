@@ -100,6 +100,7 @@ async def create(
                     run_id=run.run_id, data_classification=profile.classification
                 ),
                 ranking_options=run.dependencies.ranking,
+                options=run.dependencies.semantic_mapping,
             )
             try:
                 semantic = await mapper.propose(
@@ -140,8 +141,14 @@ async def create(
                     }
                     for choice in group.choices:
                         if choice.action == "auto" and not choice.ambiguous:
+                            scores = {
+                                score.candidate_id: score.score
+                                for score in choice.scores
+                            }
                             chosen.extend(
-                                by_id[key]
+                                by_id[key].model_copy(
+                                    update={"confidence": scores[key]}
+                                )
                                 for key in choice.selected_candidate_ids
                                 if key in by_id
                             )
@@ -183,6 +190,11 @@ async def create(
                             strategy="source_values",
                         )
                     )
+        confidence = min((c.confidence for c in selected), default=Decimal(0))
+        if semantic is not None:
+            confidence = min(
+                confidence, *(group.confidence for group in semantic.groups)
+            )
         manifest = data.manifest
         plan = MappingPlan(
             schema_version="1.1.0",
@@ -197,7 +209,7 @@ async def create(
             target_policy_fingerprint=catalog.target_policy_fingerprint,
             mappings=mappings,
             operation=operation,
-            confidence=min((c.confidence for c in selected), default=Decimal(0)),
+            confidence=confidence,
             producer=producer(),
             relations=tuple(relations),
         )

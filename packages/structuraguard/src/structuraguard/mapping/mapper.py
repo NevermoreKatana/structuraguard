@@ -38,11 +38,13 @@ def _sources(
     for field in sorted(
         profile.fields, key=lambda f: (f.field.entity_type, f.field.field_name)
     ):
+        # Служебное имя вроде email_0 не конкурирует с известным заголовком email.
+        lexical_names = field.source_names or (field.field.field_name,)
         names = tuple(
             normalize_name(
                 name, max_bytes=options.max_name_bytes, max_tokens=options.max_tokens
             )
-            for name in sorted({field.field.field_name, *field.source_names})
+            for name in sorted(set(lexical_names))
         )
         labels = {
             label.text.rsplit(".", 1)[0]

@@ -191,8 +191,20 @@ scanner, закрытая schema и membership checks независимо от 
 SDK использует `D` — исходный M9 base score и `L` — LLM signal:
 `score = clamp((1 − λ) × D + λ × L − A − V − S, 0, 1)`.
 D включает name, alias, type, value pattern, structural context и FK graph signals
-с их весами M9. Default λ=0.20, ceiling 0.30; модель не задаёт итоговый score.
-Исходные M9 signals/explanations сохраняются отдельно.
+с их весами M9. Default λ=1: проверенное семантическое соответствие может
+разрешить разные названия полей, даже когда lexical score низкий. Для прежней
+консервативной смеси задайте `llm_weight=Decimal("0.20")` явно; диапазон 0–1.
+Исходные M9 signals/explanations сохраняются отдельно. Модель оценивает каждый
+разрешённый candidate; один произвольный self-confidence не принимается.
+Все blockers, конкуренты, пороги и обязательная M11 validation сохраняются.
+Если top-k скрыл конкурента, λ=1 не допускает автоматического выбора.
+
+Оркестратор принимает эти настройки через
+`SDKDependencies(semantic_mapping=SemanticMappingOptions(...))`. Принятые SDK
+semantic scores сохраняются в `FieldMapping.confidence`; общий `MappingPlan`
+учитывает также минимум оценок выбранных таблиц/связей. Низкая lexical оценка
+после принятого семантического решения повторно не подменяет confidence.
+Изменение default policy описано в [ADR 0035](adr/0035-semantic-name-acceptance.md).
 
 | Штраф SDK | Default | Evidence |
 |---|---|---|

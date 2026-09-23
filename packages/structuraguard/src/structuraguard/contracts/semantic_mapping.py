@@ -53,7 +53,10 @@ class SemanticMappingOptions(SensitiveMappingContract):
     top_k ограничивает candidates до LLM; max_entities/max_fields/max_relations
     относятся к одной группе, max_groups — к вызову. max_seconds ограничивает
     подготовку либо весь propose; общий бюджет router действует дополнительно.
-    llm_weight задаёт долю сигнала модели, а penalties — штрафы SDK. Нулевой
+    llm_weight задаёт долю проверенного семантического сигнала модели (default 1);
+    явное значение 0.20 сохраняет прежнюю консервативную смесь с M9.
+    Независимые scope/type/coverage/ambiguity проверки действуют при любом весе,
+    а penalties — штрафы SDK. Нулевой
     штраф не снимает blocker. review_threshold должен быть ниже auto_threshold,
     ambiguity_margin — больше нуля; нарушение даёт pydantic.ValidationError.
     response_retention сохраняет проверенный decision либо только его metadata;
@@ -71,7 +74,7 @@ class SemanticMappingOptions(SensitiveMappingContract):
     max_operations: Annotated[PositiveInt, Field(le=1_000_000)] = 100_000
     max_state_bytes: Annotated[PositiveInt, Field(le=33_554_432)] = 16_777_216
     max_seconds: Annotated[PositiveInt, Field(le=300)] = 30
-    llm_weight: Annotated[Score, Field(le=Decimal("0.30"))] = Decimal("0.20")
+    llm_weight: Score = Decimal(1)
     auto_threshold: Score = Decimal("0.90")
     review_threshold: Score = Decimal("0.70")
     ambiguity_margin: Score = Decimal("0.10")

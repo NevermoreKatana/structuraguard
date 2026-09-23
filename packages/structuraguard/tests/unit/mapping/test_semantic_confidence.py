@@ -60,17 +60,18 @@ async def test_hidden_top_one_competitor_cannot_be_confirmed_by_self_score() -> 
     assert ambiguous and "UNASSESSED_COMPETITOR" in reasons
 
 
-async def test_llm_is_only_one_signal_and_decimal_context_is_local() -> None:
+async def test_explicit_blend_and_decimal_context_are_preserved() -> None:
     data = await profile()
     db = catalog(table("customers", column("email")))
     prepared = await prepare_semantic_mapping(
         data, db, scope=scope_for(db), ranking_options=DeterministicMappingOptions()
     )
     decision = decision_for(prepared.groups[0])
-    first = aggregate(prepared.groups[0], decision, SemanticMappingOptions())
+    options = SemanticMappingOptions(llm_weight=Decimal("0.20"))
+    first = aggregate(prepared.groups[0], decision, options)
     with localcontext() as ctx:
         ctx.prec = 2
-        second = aggregate(prepared.groups[0], decision, SemanticMappingOptions())
+        second = aggregate(prepared.groups[0], decision, options)
     assert first == second
     score = first[0][1].scores[0]
     signals = prepared.groups[0].columns[0].explanation.signals
@@ -176,7 +177,7 @@ async def test_validation_and_security_penalties_are_sdk_evidence() -> None:
     score = choice.scores[0]
     assert score.validation_penalty == Decimal("0.10")
     assert score.security_penalty == Decimal("0.20")
-    assert score.score == confidence == Decimal("0.698000")
+    assert score.score == confidence == Decimal("0.690000")
     assert choice.action == "reject"
     assert "CONFUSABLE_NAME" in reasons
 
@@ -236,4 +237,4 @@ async def test_zero_penalty_cannot_remove_blocker_and_large_penalties_clamp(
         security_warning=True,
     )
     assert choices[1].action == ("confirm" if penalty == "0" else "reject")
-    assert confidence == (Decimal("0.998000") if penalty == "0" else Decimal(0))
+    assert confidence == (Decimal("0.990000") if penalty == "0" else Decimal(0))

@@ -28,6 +28,22 @@ class PatternMatch:
     blockers: tuple[str, ...] = ()
 
 
+def null_text_compatible(field: NormalizedFieldProfile, column: ColumnCatalog) -> bool:
+    """Полностью наблюдаемые NULL допустимы в nullable builtin TEXT без cast."""
+    return (
+        column.nullable
+        and column.inspection is not None
+        and column.inspection.data_type.type_kind in {None, "builtin"}
+        and column.inspection.data_type.canonical_type == "text"
+        and field.entity_count > 0
+        and field.explicit_null_count == field.entity_count
+        and field.non_null_count == 0
+        and field.missing_count == 0
+        and not field.reasons
+        and all(kind.name == "null" for kind in field.observed_kinds if kind.count)
+    )
+
+
 def expected_patterns(
     column: ColumnCatalog, semantic_type: str | None
 ) -> tuple[str, ...]:
@@ -159,6 +175,9 @@ def type_compatibility(
         blockers.add("SOURCE_EVIDENCE_CONFLICT")
     if not column.nullable and field.null_count:
         blockers.add("REQUIRED_VALUE_MISSING")
+    if null_text_compatible(field, column):
+        blockers.discard("TYPE_EVIDENCE_INCOMPLETE")
+        return Compatibility("compatible", Decimal(1), tuple(sorted(blockers)))
     if column.inspection is None or not field.non_null_count:
         return Compatibility(
             "unknown", Decimal(0), tuple(sorted(blockers | {"TYPE_UNKNOWN"}))
@@ -231,6 +250,15 @@ def type_compatibility(
         "datetime": {"datetime"},
     }
     if observed and observed <= native.get(target, set()):
+        # Малый файл не доказывает semantic type, но полные string values уже
+        # совместимы с TEXT без нормализации и риска потери ведущих нулей.
+        if (
+            target == "text"
+            and observed == {"string"}
+            and field.string_count == field.non_null_count
+            and field.inference.status == "insufficient_evidence"
+        ):
+            blockers.discard("TYPE_EVIDENCE_INCOMPLETE")
         return Compatibility("compatible", Decimal(1), tuple(sorted(blockers)))
     convertible = {
         "string": {

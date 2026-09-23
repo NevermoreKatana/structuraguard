@@ -175,9 +175,14 @@ async def test_missing_evidence_is_visible_under_adversarial_weights(
             signals["database_relation_score"].value == 0
             and not signals["database_relation_score"].available
         )
+    elif missing == "null_only":
+        # Тип неизвестен, но все реальные значения уже NULL, а TEXT nullable.
+        assert field.status == "auto_candidate" and not explanation.blockers
+        assert explanation.compatibility == "compatible"
+        assert signals["type_compatibility"].available
     else:
         assert field.status == "review" and explanation.blockers
-    if missing in {"null_only", "unknown_type"}:
+    if missing == "unknown_type":
         assert explanation.compatibility == "unknown"
         assert not signals["type_compatibility"].available
     if missing == "pattern_skipped":

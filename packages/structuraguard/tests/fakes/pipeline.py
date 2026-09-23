@@ -62,7 +62,9 @@ from structuraguard.security.session import SecuritySession
 from structuraguard.stores import MemoryStagingStore
 from tests.fakes.mapping import catalog, column, scope_for, table
 
-DATA = b'[{"name":"Ada","city":"Riga"},{"name":"Bob","city":"Oslo"}]'
+# Имена source совпадают с тестовой БД: служебные semantic IDs не заменяют
+# реальные JSON keys при автоматическом сопоставлении.
+DATA = b'[{"field_0":"Ada","field_1":"Riga"},{"field_0":"Bob","field_1":"Oslo"}]'
 
 
 class FakeParser:

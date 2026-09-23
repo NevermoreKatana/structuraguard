@@ -25,7 +25,7 @@ async def test_unambiguous_choice_keeps_sdk_score_and_provider_metadata() -> Non
     )
     group = result.groups[0]
     assert result.status is PipelineStatus.COMPLETED
-    assert group.confidence == Decimal("0.998000")
+    assert group.confidence == Decimal("0.990000")
     assert group.choices[0].scores[0].llm_score == Decimal("0.990000")
     assert group.calls[0].provider_id == "fake"
     assert group.calls[0].model_id == "scripted"

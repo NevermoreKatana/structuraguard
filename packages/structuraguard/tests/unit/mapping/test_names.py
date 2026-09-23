@@ -46,6 +46,47 @@ def test_empty_forms_and_partial_substrings_are_not_exact_matches() -> None:
 @pytest.mark.parametrize(
     ("source", "target"),
     [
+        ("postal_codde", "postal_code"),
+        ("postla_code", "postal_code"),
+        ("customer_adresss", "customer_address"),
+        ("почтовый_инндекс", "почтовый_индекс"),
+        ("διεύθυνσση", "διεύθυνση"),
+    ],
+)
+def test_bounded_typos_offer_weaker_symmetric_name_evidence(
+    source: str, target: str
+) -> None:
+    left, right = normalize_name(source), normalize_name(target)
+    evidence = compare_names(left, right)
+    assert Decimal("0.65") < evidence.edit < Decimal("0.90")
+    assert evidence.edit == compare_names(right, left).edit
+    assert evidence.score < compare_names(right, right).score
+    assert (left.raw, right.raw) == (source, target)
+
+
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [
+        ("id", "paid"),
+        ("code", "codde"),
+        ("sum", "sun"),
+        ("email_1", "email_2"),
+        ("email_10", "email_1"),
+        ("email_0", "email"),
+        ("Клиeнт", "Клиент"),
+        ("weather", "legal_name"),
+        ("postxxxxxxxxcode", "postal_code"),
+    ],
+)
+def test_fuzzy_names_do_not_erase_meaningful_differences(
+    source: str, target: str
+) -> None:
+    assert compare_names(normalize_name(source), normalize_name(target)).edit == 0
+
+
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [
         ("Общая сумма", "total_amount"),
         ("Дата создания", "created_at"),
         ("ИНН организации", "inn"),

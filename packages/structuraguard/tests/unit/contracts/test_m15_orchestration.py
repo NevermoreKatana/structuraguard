@@ -65,7 +65,7 @@ def test_safe_summary_contains_no_source_canary() -> None:
     result = asyncio.run(
         engine(FakeDatabase()).ingest(
             request(
-                b'[{"name":"source-canary-private","city":"Riga"},{"name":"Bob","city":"Oslo"}]'
+                b'[{"field_0":"source-canary-private","field_1":"Riga"},{"field_0":"Bob","field_1":"Oslo"}]'
             ),
             dry_run=True,
         )
