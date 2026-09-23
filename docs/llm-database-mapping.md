@@ -123,7 +123,15 @@ non-writable, system и запрещённые scope targets в writable candida
 
 Модель возвращает `SemanticMappingDecision`: обязательные `schema_version`,
 `group_id`, `candidate_set_fingerprint`, `tables`, `columns`, `relations`,
-`review_required`. Каждый source имеет полный список `assessments` переданных
+`review_required`. В prompt версии 1.3.0 варианты называются `column_candidates`, `table_candidates`
+и `relation_candidates`, чтобы не смешивать их с решениями ответа. У каждого
+`fields`/`entities` перечислены допустимые `candidate_ids`. `fields.name` показывает
+единственное проверенное исходное имя, если оно известно; `semantic_field_name`
+сохраняет внутреннее имя SDK, а `source_id` остаётся адресом выбора. Один исходный
+field требует ровно одного объекта в `columns` ответа, независимо от числа его
+кандидатов. Ответ запрашивается как компактный JSON; его строгая валидация прежняя.
+
+Каждый source имеет полный список `assessments` переданных
 ему candidates, status `selected/ambiguous/unmapped` и закрытый `reason_code`.
 Для колонок и связей выбор один или null; для таблиц `selected_candidate_ids`
 допускает несколько значений. Scores — строки `0.000000`–`1.000000` с шестью
