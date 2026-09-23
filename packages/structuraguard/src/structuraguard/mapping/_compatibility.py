@@ -256,7 +256,7 @@ def type_compatibility(
             target == "text"
             and observed == {"string"}
             and field.string_count == field.non_null_count
-            and field.inference.status == "insufficient_evidence"
+            and field.inference.status in {"insufficient_evidence", "ambiguous"}
         ):
             blockers.discard("TYPE_EVIDENCE_INCOMPLETE")
         return Compatibility("compatible", Decimal(1), tuple(sorted(blockers)))

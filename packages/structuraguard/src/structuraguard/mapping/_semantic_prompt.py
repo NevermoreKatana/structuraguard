@@ -107,7 +107,12 @@ def group_payload(
                 "entity_id": entry.entity_id,
                 "name": projection.text(f.field.field_name),
                 "semantic_type": projection.text(f.declared_semantic_type),
-                "labels": [projection.text(label.text) for label in f.labels[:4]],
+                "labels": [
+                    projection.text(label.text)
+                    for label in sorted(
+                        f.labels, key=lambda label: label.kind != "source_name"
+                    )[:4]
+                ],
                 "null_ratio": str(f.null_ratio) if f.null_ratio is not None else None,
                 "unique_ratio": str(f.unique_ratio)
                 if f.unique_ratio is not None

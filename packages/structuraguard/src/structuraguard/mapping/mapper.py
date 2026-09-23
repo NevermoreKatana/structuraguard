@@ -315,7 +315,11 @@ class DeterministicMapper:
                             and not contextual.graph
                         ):
                             blockers.add("GENERIC_NAME_ONLY")
-                        if (contextual.structure or contextual.graph) and any(
+                        if (
+                            contextual.structure * options.weights.structural_context
+                            or contextual.graph
+                            * options.weights.database_relation_score
+                        ) and any(
                             r in profile.reasons
                             for r in ("pair_limit", "context_limit")
                         ):

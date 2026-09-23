@@ -28,6 +28,24 @@ async def test_small_complete_strings_are_compatible_with_text(text: str) -> Non
     assert compatibility.blockers == ()
 
 
+async def test_competing_semantic_string_types_still_store_losslessly_as_text() -> None:
+    profile = await NormalizedDataProfiler().profile(
+        normalized_stream(
+            [
+                {"postal_codde": StringScalar(value=value)}
+                for value in ("00123", "101000", "190000")
+            ]
+        )
+    )
+    field = profile.fields[0]
+    assert field.inference.status == "ambiguous"
+    assert type_compatibility(field, column("postal_code")).blockers == ()
+    assert (
+        type_compatibility(field, column("postal_code", "integer")).status
+        != "compatible"
+    )
+
+
 async def test_small_strings_do_not_bypass_conversion_or_column_constraints() -> None:
     profile = await NormalizedDataProfiler().profile(
         normalized_stream([{"postal_codde": StringScalar(value="101000")}] * 3)
