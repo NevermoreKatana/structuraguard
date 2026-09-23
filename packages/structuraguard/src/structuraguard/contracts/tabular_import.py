@@ -120,9 +120,23 @@ class TabularSplitChoice(_TabularWireChoice):
     part_count: Annotated[PositiveInt, Field(ge=2, le=8)]
 
 
-type TabularImportChoice = Annotated[
-    TabularCopyChoice | TabularSplitChoice, Field(discriminator="operation")
-]
+class TabularWhitespaceSplitChoice(TabularSplitChoice):
+    """Пробельное разделение не принимает буквальный delimiter."""
+
+    split_mode: Literal["whitespace"]
+    delimiter: None
+
+
+class TabularLiteralSplitChoice(TabularSplitChoice):
+    """Буквальное разделение требует непустой ограниченный delimiter."""
+
+    split_mode: Literal["literal"]
+    delimiter: Annotated[StrictStr, Field(min_length=1, max_length=8)]
+
+
+type TabularImportChoice = (
+    TabularCopyChoice | TabularWhitespaceSplitChoice | TabularLiteralSplitChoice
+)
 
 
 class TabularImportSuggestion(SensitiveMappingContract):

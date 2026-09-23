@@ -277,14 +277,37 @@ def _assignments(
                     },
                 )
             continue
+        for item in items:
+            if item.operation != "split":
+                continue
+            if (
+                item.part_count is None
+                or item.part_count < 2
+                or item.part_index is None
+                or item.part_index >= item.part_count
+                or item.split_mode is None
+                or (item.split_mode == "whitespace" and item.delimiter is not None)
+                or (item.split_mode == "literal" and item.delimiter is None)
+            ):
+                raise _failure(
+                    "TABULAR_IMPORT_OPERATION_INVALID",
+                    source_id=source_id,
+                    target=item.target,
+                    actual=_operation_parameters(item),
+                    expected={
+                        "operation": "split",
+                        "split_mode": item.split_mode or "whitespace|literal",
+                        "delimiter_supplied": item.split_mode == "literal",
+                        "part_count_min": 2,
+                        "part_count_max": 8,
+                        "part_index_min": 0,
+                        "part_index_max": (item.part_count or 8) - 1,
+                    },
+                )
+        assert first.part_count is not None
         signature = (first.split_mode, first.delimiter, first.part_count)
         if (
-            first.part_count is None
-            or first.part_count < 2
-            or first.split_mode is None
-            or (first.split_mode == "whitespace" and first.delimiter is not None)
-            or (first.split_mode == "literal" and first.delimiter is None)
-            or any(
+            any(
                 item.operation != "split"
                 or (item.split_mode, item.delimiter, item.part_count) != signature
                 for item in items

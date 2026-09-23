@@ -253,6 +253,20 @@ async def test_model_output_is_not_repaired_or_filled_with_default_fields() -> N
             "part_count": 1,
         },
         {"operation": "split", "split_mode": "whitespace", "part_count": 2},
+        {
+            "operation": "split",
+            "split_mode": "whitespace",
+            "delimiter": " ",
+            "part_index": 0,
+            "part_count": 2,
+        },
+        {
+            "operation": "split",
+            "split_mode": "literal",
+            "delimiter": None,
+            "part_index": 0,
+            "part_count": 2,
+        },
     ],
 )
 async def test_wire_schema_rejects_inconsistent_copy_and_split_parameters(
@@ -328,26 +342,31 @@ def test_schema_branches_force_null_copy_parameters_and_complete_split_parameter
 ):
     registered = tabular_import_response_schema()
     schema = json.loads(registered.schema_json)
-    assert registered.version == "1.1.0"
+    assert registered.version == "1.2.0"
     item = schema["properties"]["assignments"]["items"]
     if "$ref" in item:
         item = schema["$defs"][item["$ref"].rsplit("/", 1)[1]]
-    assert item["discriminator"]["propertyName"] == "operation"
-    assert len(item["oneOf"]) == 2
+    assert len(item["anyOf"]) == 3
     copy = schema["$defs"]["TabularCopyChoice"]["properties"]
     assert copy["operation"]["const"] == "copy"
     for key in ("split_mode", "delimiter", "part_index", "part_count"):
         assert copy[key]["type"] == "null"
-    split = schema["$defs"]["TabularSplitChoice"]["properties"]
+    split = schema["$defs"]["TabularWhitespaceSplitChoice"]["properties"]
     assert split["operation"]["const"] == "split"
     assert split["part_count"]["minimum"] == 2
     assert split["part_index"]["type"] == "integer"
-    assert split["split_mode"]["enum"] == ["whitespace", "literal"]
+    assert split["split_mode"]["const"] == "whitespace"
+    assert split["delimiter"]["type"] == "null"
+    literal = schema["$defs"]["TabularLiteralSplitChoice"]["properties"]
+    assert literal["split_mode"]["const"] == "literal"
+    assert literal["delimiter"]["type"] == "string"
+    assert literal["delimiter"]["minLength"] == 1
+    assert literal["delimiter"]["maxLength"] == 8
 
 
 def test_prompt_contains_full_valid_copy_plus_two_part_split_example() -> None:
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.1.0"
+    assert prompt.version == "1.2.0"
     assert "NOT source fields" in prompt.text
     assert "part_index 0 AND 1" in prompt.text
     start = prompt.text.index('{"decision":"map"')

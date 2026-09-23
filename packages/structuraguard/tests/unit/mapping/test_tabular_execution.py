@@ -14,7 +14,8 @@ from structuraguard.contracts.tabular_import import (
     TabularImportPlan,
     TabularImportSource,
     TabularImportSuggestion,
-    TabularSplitChoice,
+    TabularLiteralSplitChoice,
+    TabularWhitespaceSplitChoice,
 )
 from structuraguard.mapping.tabular_execution import (
     TabularImportError,
@@ -55,7 +56,7 @@ def sample() -> tuple[
             reason="semantic_name",
         ),
         *(
-            TabularSplitChoice(
+            TabularWhitespaceSplitChoice(
                 source_id="s1",
                 target_id=aliases[name],
                 operation="split",
@@ -208,7 +209,9 @@ def test_literal_delimiter_and_null_values_are_explicit() -> None:
     suggestion = suggestion.model_copy(
         update={
             "assignments": tuple(
-                c.model_copy(update={"split_mode": "literal", "delimiter": "|"})
+                TabularLiteralSplitChoice.model_validate(
+                    {**c.model_dump(), "split_mode": "literal", "delimiter": "|"}
+                )
                 if c.operation == "split"
                 else c
                 for c in suggestion.assignments
@@ -238,7 +241,7 @@ def test_general_composite_value_splits_into_city_and_country() -> None:
         confidence=Decimal("0.98"),
         reason="semantic_equivalence",
         assignments=tuple(
-            TabularSplitChoice(
+            TabularLiteralSplitChoice(
                 source_id="s0",
                 target_id=f"c{i}",
                 operation="split",
@@ -319,3 +322,26 @@ def test_operation_diagnostics_show_closed_parameters_without_raw_values(
         assert parameters[1]["operation"] == "copy"
         assert expected["operation"] == "split"
     assert "canary" not in str(details) and "Иванов Иван" not in str(details)
+
+
+def test_wrong_whitespace_delimiter_is_operation_error_with_exact_requirement() -> None:
+    source, db, scope, suggestion = sample()
+    plan = bind_tabular_import_plan(source, db, scope, suggestion)
+    wire = plan.model_dump(exclude={"fingerprint"})
+    for assignment in wire["assignments"]:
+        if assignment["operation"] == "split":
+            assignment["delimiter"] = "canary"
+    invalid = TabularImportPlan.model_validate(wire)
+    with pytest.raises(
+        TabularImportError, match="TABULAR_IMPORT_OPERATION_INVALID"
+    ) as captured:
+        execute_tabular_import(source.labels, source.rows, db, scope, invalid)
+    details = captured.value.details
+    actual, expected = details["actual"], details["expected"]
+    assert isinstance(actual, Mapping) and isinstance(expected, Mapping)
+    assert actual["split_mode"] == "whitespace"
+    assert actual["delimiter_supplied"] is True
+    assert expected["delimiter_supplied"] is False
+    assert details["source_id"] == "s1"
+    assert details["expected_parts"] is None and details["actual_parts"] is None
+    assert "canary" not in str(details)
