@@ -298,10 +298,16 @@ class DeterministicMapper:
                             contextual.graph,
                         )
                     ):
+                        context_blockers = set(contextual.blockers)
+                        if not (
+                            options.weights.structural_context
+                            or options.weights.database_relation_score
+                        ):
+                            context_blockers.discard("CONTEXT_EVIDENCE_INCOMPLETE")
                         blockers = (
                             set(evidence.compatibility.blockers)
                             | set(evidence.pattern.blockers)
-                            | set(contextual.blockers)
+                            | context_blockers
                         )
                         if (
                             any(n.confusable for n in source.names)

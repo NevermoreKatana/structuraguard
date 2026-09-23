@@ -284,6 +284,7 @@ async def test_unused_context_limit_does_not_block_exact_name_mapping() -> None:
             field.model_copy(
                 update={
                     "field": ref,
+                    "reasons": ("context_limit",),
                     "pii": field.pii.model_copy(update={"field": ref}),
                 }
             ),
