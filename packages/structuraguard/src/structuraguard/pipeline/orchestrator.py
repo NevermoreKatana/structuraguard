@@ -18,6 +18,7 @@ from structuraguard.profiling import NormalizedDataProfiler
 from structuraguard.structure.hybrid import HybridAnalysis
 
 from . import loading, mapping, parsing, validation
+from ._profile_labels import source_labels
 from .composition import SDKDependencies
 from .mapping import MappingProposal
 from .session import PipelineError, RunSession
@@ -161,6 +162,7 @@ class Orchestrator:
                     source_fingerprint=source.manifest.source.source_fingerprint,
                     extraction_fingerprint=source.manifest.extraction_fingerprint,
                     parse_plan_fingerprint=source.manifest.parse_plan_fingerprint,
+                    labels=source_labels(source),
                 ),
             )
             run.set(normalized_profile=result)

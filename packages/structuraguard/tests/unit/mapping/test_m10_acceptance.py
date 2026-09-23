@@ -316,7 +316,9 @@ async def test_gap_equal_to_margin_is_distinct_from_gap_below_margin(
             )
         }
     )
-    choices, _, _, _ = aggregate(group, decision, SemanticMappingOptions())
+    choices, _, _, _ = aggregate(
+        group, decision, SemanticMappingOptions(llm_weight=Decimal("0.20"))
+    )
     selected = next(c for c in choices if c.source_id == choice.source_id)
     assert selected.ambiguous is ambiguous
     assert selected.action == ("confirm" if ambiguous else "auto")

@@ -190,7 +190,7 @@ async def test_approved_security_warning_penalizes_sdk_score_and_prevents_auto()
         ranking_options=mapping_options(),
     ).propose(data, db, scope=scope_for(db))
     assert result.action == "confirm" and result.status is PipelineStatus.NEEDS_REVIEW
-    assert result.groups[0].confidence == Decimal("0.798000")
+    assert result.groups[0].confidence == Decimal("0.790000")
     assert result.groups[0].security_report_fingerprint
     assert all(
         s.security_penalty == Decimal("0.20")

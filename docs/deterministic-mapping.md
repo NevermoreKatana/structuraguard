@@ -185,6 +185,12 @@ Unknown types, domain checks, enum membership, precision/scale и timezone мо�
 требовать дальнейшей validation. SQLite affinity сама по себе не подтверждает
 совместимость. Null/default и generated/writable учитываются раздельно.
 
+Для малого файла полностью наблюдаемые string values совместимы с TEXT без
+семантической конверсии: порог числа наблюдений inference не блокирует такой
+перенос. Поле, все присутствующие значения которого явно NULL, допустимо в
+nullable builtin TEXT. Это не снимает NOT NULL, ограничения длины, domain checks
+или необходимость проверять смешанные типы и пропущенные значения.
+
 Source context — semantic entity type, сохранённые labels файла/листа/родителя/
 секции/таблицы и co-occurrence neighbors. Anchors определяются один раз по
 lexical/type evidence без context. FK signal различает table-level поддержку
@@ -193,6 +199,10 @@ lexical/type evidence без context. FK signal различает table-level �
 неподтверждённый parent resolution оставляет `FK_UNRESOLVED`. Исключение
 родителя из scope не снимает blocker с дочерней колонки. Даже полное
 structural evidence не проверяет реальные FK values или grants.
+
+При наличии `source_names` lexical evidence берётся из них; служебный semantic ID
+используется только при отсутствии исходного имени. Так `email_0`, созданное SDK
+для заголовка `email`, не становится предпочтением реальной колонки `email_0`.
 
 ## Лимиты и ошибки
 

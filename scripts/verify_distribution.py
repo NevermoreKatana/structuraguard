@@ -278,6 +278,7 @@ _PACKAGE_FILES = frozenset(
         "structuraguard/py.typed",
         "structuraguard/contracts/orchestration.py",
         "structuraguard/pipeline/__init__.py",
+        "structuraguard/pipeline/_profile_labels.py",
         "structuraguard/pipeline/composition.py",
         "structuraguard/pipeline/loading.py",
         "structuraguard/pipeline/mapping.py",

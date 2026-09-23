@@ -24,6 +24,7 @@ from structuraguard.contracts.reports import AuditEvent
 from structuraguard.contracts.security import SecurityPolicy
 from structuraguard.contracts.semantic import ParsingPolicy
 from structuraguard.contracts.semantic_catalog import DatabaseSemanticCatalog
+from structuraguard.contracts.semantic_mapping import SemanticMappingOptions
 from structuraguard.contracts.staging import StagingArtifactReference
 from structuraguard.ports.database import DatabaseAdapter
 from structuraguard.ports.llm import LLMProvider
@@ -103,6 +104,7 @@ class SDKDependencies:
     """Явная конфигурация политик, адаптеров и фабрик SDK без глобального состояния.
 
     security/parsing/privacy/injection/provenance/ranking задают границы stages.
+    semantic_mapping задаёт бюджеты, пороги и confidence policy LLM mapping.
     routing/providers/scanner разрешают LLM только после request-bound approval;
     отсутствие scanner не разрешает отправку. database/audit — фабрики одного
     SecuritySession; hooks получают безопасные AuditEvent последовательно.
@@ -123,6 +125,9 @@ class SDKDependencies:
     provenance: ProvenancePolicy = field(default_factory=ProvenancePolicy)
     ranking: DeterministicMappingOptions = field(
         default_factory=DeterministicMappingOptions
+    )
+    semantic_mapping: SemanticMappingOptions = field(
+        default_factory=SemanticMappingOptions
     )
     routing: LLMRoutingPolicy | None = None
     providers: tuple[LLMProvider, ...] = field(default=(), repr=False)

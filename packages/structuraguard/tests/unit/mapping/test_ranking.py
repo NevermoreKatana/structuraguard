@@ -3,7 +3,15 @@
 from decimal import Decimal, localcontext
 
 import pytest
-from tests.fakes.mapping import catalog, column, profile, refs, table
+from tests.fakes.mapping import (
+    catalog,
+    column,
+    only_weight,
+    profile,
+    refs,
+    rehash_profile,
+    table,
+)
 
 from structuraguard.contracts.common import StringScalar
 from structuraguard.contracts.deterministic_mapping import (
@@ -11,6 +19,7 @@ from structuraguard.contracts.deterministic_mapping import (
     MappingScope,
     MappingWeights,
 )
+from structuraguard.contracts.profiling import ProfileLabel
 from structuraguard.contracts.semantic_catalog import (
     DatabaseSemanticCatalog,
     SemanticColumn,
@@ -86,6 +95,87 @@ async def test_empty_scope_and_unrelated_names_are_explicitly_unmapped() -> None
         )
         assert result.fields[0].status == "unmapped"
         assert not result.fields[0].candidates
+
+
+@pytest.mark.parametrize("name", ["postal_codde", "postalcode", "postal-code"])
+async def test_similar_names_offer_allowed_compatible_candidates(name: str) -> None:
+    data = await profile({name: StringScalar(value="101000")})
+    db = catalog(table("contacts", column("postal_code")))
+    result = await DeterministicMapper().rank(
+        data,
+        db,
+        scope=MappingScope(
+            target_id=db.target_id,
+            target_policy_fingerprint=db.target_policy_fingerprint,
+            allow=refs(db),
+        ),
+    )
+    field = result.fields[0]
+    assert field.candidates[0].target.column_id == "postal_code"
+    assert not field.ambiguous
+    assert field.explanations[0].signals[3].code == "name_similarity"
+    assert field.explanations[0].signals[3].value > Decimal("0.8")
+
+
+async def test_equal_typo_candidates_remain_ambiguous() -> None:
+    data = await profile({"postal_codde": StringScalar(value="101000")})
+    db = catalog(
+        table("contacts", column("postal_code")),
+        table("addresses", column("postal_code")),
+    )
+    result = await DeterministicMapper().rank(
+        data,
+        db,
+        scope=MappingScope(
+            target_id=db.target_id,
+            target_policy_fingerprint=db.target_policy_fingerprint,
+            allow=refs(db),
+        ),
+    )
+    field = result.fields[0]
+    assert len(field.candidates) == 2
+    assert field.ambiguous and field.gap == 0
+    assert field.status != "auto_candidate"
+
+
+@pytest.mark.parametrize("header", ["email", "email_0", None])
+async def test_observed_header_takes_priority_over_generated_semantic_name(
+    header: str | None,
+) -> None:
+    data = await profile({"email_0": StringScalar(value="person@example.org")})
+    original = data.fields[0]
+    if header is not None:
+        labelled = original.model_copy(
+            update={
+                "labels": (
+                    ProfileLabel(
+                        field=original.field,
+                        kind="source_name",
+                        text=header,
+                        origin="observed_location",
+                    ),
+                ),
+                "context_available": True,
+            }
+        )
+        data = rehash_profile(data, fields=(labelled,))
+    db = catalog(table("contacts", column("email"), column("email_0", position=1)))
+    mapper = DeterministicMapper(
+        DeterministicMappingOptions(weights=only_weight("name_similarity"))
+    )
+    result = await mapper.rank(
+        data,
+        db,
+        scope=MappingScope(
+            target_id=db.target_id,
+            target_policy_fingerprint=db.target_policy_fingerprint,
+            allow=refs(db),
+        ),
+    )
+    field = result.fields[0]
+    assert field.source == original.field
+    assert field.candidates[0].target.column_id == (header or "email_0")
+    assert not field.ambiguous
 
 
 async def test_russian_aliases_are_scoped_and_do_not_hide_competitors() -> None:

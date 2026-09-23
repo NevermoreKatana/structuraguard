@@ -157,7 +157,11 @@ async def test_missing_evidence_is_visible_under_adversarial_weights(
         )
     )
     result = await DeterministicMapper(
-        DeterministicMappingOptions(weights=only_weight("name_similarity"))
+        DeterministicMappingOptions(
+            weights=only_weight(
+                "structural_context" if missing == "pair_limit" else "name_similarity"
+            )
+        )
     ).rank(data, db, scope=scope_for(db))
     field = result.fields[0]
     if missing == "mixed_kinds":
@@ -175,9 +179,14 @@ async def test_missing_evidence_is_visible_under_adversarial_weights(
             signals["database_relation_score"].value == 0
             and not signals["database_relation_score"].available
         )
+    elif missing == "null_only":
+        # Тип неизвестен, но все реальные значения уже NULL, а TEXT nullable.
+        assert field.status == "auto_candidate" and not explanation.blockers
+        assert explanation.compatibility == "compatible"
+        assert signals["type_compatibility"].available
     else:
         assert field.status == "review" and explanation.blockers
-    if missing in {"null_only", "unknown_type"}:
+    if missing == "unknown_type":
         assert explanation.compatibility == "unknown"
         assert not signals["type_compatibility"].available
     if missing == "pattern_skipped":
@@ -262,3 +271,30 @@ async def test_category_and_identity_patterns_use_distinct_profile_flags() -> No
     assert pattern_match(identity, ("categorical",)).score == 0
     assert pattern_match(identity, ("identity",)).score == 1
     assert pattern_match(category, ("identity",)).score == 0
+
+
+async def test_unused_context_limit_does_not_block_exact_name_mapping() -> None:
+    data = await profile()
+    field = data.fields[0]
+    ref = field.field.model_copy(update={"entity_type": "customers"})
+    data = rehash_profile(
+        data,
+        reasons=("context_limit",),
+        fields=(
+            field.model_copy(
+                update={
+                    "field": ref,
+                    "reasons": ("context_limit",),
+                    "pii": field.pii.model_copy(update={"field": ref}),
+                }
+            ),
+        ),
+    )
+    db = catalog(table("customers", column("email")))
+    result = await DeterministicMapper(
+        DeterministicMappingOptions(weights=only_weight("name_similarity"))
+    ).rank(data, db, scope=scope_for(db))
+    assert result.fields[0].status == "auto_candidate"
+    assert (
+        "CONTEXT_EVIDENCE_INCOMPLETE" not in result.fields[0].explanations[0].blockers
+    )

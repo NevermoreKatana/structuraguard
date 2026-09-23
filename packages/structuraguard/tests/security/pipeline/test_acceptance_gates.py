@@ -121,7 +121,9 @@ async def test_value_changing_normalization_is_explicitly_blocked() -> None:
         )
     )
     result = await engine(dependencies=replace(defaults(db), provenance=policy)).ingest(
-        request(b'[{"name":" Ada ","city":"Riga"},{"name":" Bob ","city":"Oslo"}]')
+        request(
+            b'[{"field_0":" Ada ","field_1":"Riga"},{"field_0":" Bob ","field_1":"Oslo"}]'
+        )
     )
     assert result.status is S.NEEDS_REVIEW
     assert result.errors[-1].code == "DRY_RUN_PROVENANCE_UNVERIFIED"

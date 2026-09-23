@@ -38,11 +38,13 @@ def _sources(
     for field in sorted(
         profile.fields, key=lambda f: (f.field.entity_type, f.field.field_name)
     ):
+        # Служебное имя вроде email_0 не конкурирует с известным заголовком email.
+        lexical_names = field.source_names or (field.field.field_name,)
         names = tuple(
             normalize_name(
                 name, max_bytes=options.max_name_bytes, max_tokens=options.max_tokens
             )
-            for name in sorted({field.field.field_name, *field.source_names})
+            for name in sorted(set(lexical_names))
         )
         labels = {
             label.text.rsplit(".", 1)[0]
@@ -296,10 +298,16 @@ class DeterministicMapper:
                             contextual.graph,
                         )
                     ):
+                        context_blockers = set(contextual.blockers)
+                        if not (
+                            options.weights.structural_context
+                            or options.weights.database_relation_score
+                        ):
+                            context_blockers.discard("CONTEXT_EVIDENCE_INCOMPLETE")
                         blockers = (
                             set(evidence.compatibility.blockers)
                             | set(evidence.pattern.blockers)
-                            | set(contextual.blockers)
+                            | context_blockers
                         )
                         if (
                             any(n.confusable for n in source.names)
@@ -313,7 +321,11 @@ class DeterministicMapper:
                             and not contextual.graph
                         ):
                             blockers.add("GENERIC_NAME_ONLY")
-                        if (contextual.structure or contextual.graph) and any(
+                        if (
+                            contextual.structure * options.weights.structural_context
+                            or contextual.graph
+                            * options.weights.database_relation_score
+                        ) and any(
                             r in profile.reasons
                             for r in ("pair_limit", "context_limit")
                         ):

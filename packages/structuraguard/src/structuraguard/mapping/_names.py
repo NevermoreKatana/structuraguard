@@ -83,11 +83,17 @@ class NameEvidence:
     compact: Decimal = Decimal(0)
     token: Decimal = Decimal(0)
     transliterated: Decimal = Decimal(0)
+    edit: Decimal = Decimal(0)
 
     @property
     def score(self) -> Decimal:
         return max(
-            self.exact, self.normalized, self.compact, self.token, self.transliterated
+            self.exact,
+            self.normalized,
+            self.compact,
+            self.token,
+            self.transliterated,
+            self.edit,
         )
 
 
@@ -147,6 +153,51 @@ def token_dice(left: tuple[str, ...], right: tuple[str, ...]) -> Decimal:
     return ratio(2 * weight(a & b), weight(a) + weight(b))
 
 
+def _bounded_edit_distance(left: str, right: str, limit: int) -> int:
+    """Вставки, удаления, замены и соседние перестановки: O(length × limit)."""
+    overflow = limit + 1
+    if abs(len(left) - len(right)) > limit:
+        return overflow
+    previous = {j: j for j in range(min(len(right), limit) + 1)}
+    before_previous: dict[int, int] = {}
+    for i, char in enumerate(left, 1):
+        current = {0: i} if i <= limit else {}
+        for j in range(max(1, i - limit), min(len(right), i + limit) + 1):
+            value = min(
+                previous.get(j, overflow) + 1,
+                current.get(j - 1, overflow) + 1,
+                previous.get(j - 1, overflow) + (char != right[j - 1]),
+            )
+            if i > 1 and j > 1 and char == right[j - 2] and left[i - 2] == right[j - 1]:
+                value = min(value, before_previous.get(j - 2, overflow) + 1)
+            current[j] = min(value, overflow)
+        if min(current.values(), default=overflow) > limit:
+            return overflow
+        before_previous, previous = previous, current
+    return previous.get(len(right), overflow)
+
+
+def _edit_similarity(left: Name, right: Name) -> Decimal:
+    """Опечатка предлагает кандидата, но слабее точного имени и не стирает цифры."""
+    if (
+        left.compact == right.compact
+        or min(len(left.compact), len(right.compact)) < 4
+        or left.generic
+        or right.generic
+        or left.confusable
+        or right.confusable
+        or tuple(t for t in left.tokens if t.isdigit())
+        != tuple(t for t in right.tokens if t.isdigit())
+    ):
+        return Decimal(0)
+    length = max(len(left.compact), len(right.compact))
+    limit = min(3, length // 4)
+    distance = _bounded_edit_distance(left.compact, right.compact, limit)
+    if distance > limit:
+        return Decimal(0)
+    return product(ratio(length - distance, length), Decimal("0.90"))
+
+
 def compare_names(left: Name, right: Name) -> NameEvidence:
     """Raw, normalized и transliteration видны отдельно от выбранного max."""
     if not left.tokens or not right.tokens:
@@ -169,6 +220,7 @@ def compare_names(left: Name, right: Name) -> NameEvidence:
         compact=Decimal("0.95") if left.compact == right.compact else Decimal(0),
         token=product(token_dice(left.tokens, right.tokens), Decimal("0.90")),
         transliterated=transliteration,
+        edit=_edit_similarity(left, right),
     )
 
 
@@ -180,4 +232,5 @@ def best_names(sources: tuple[Name, ...], target: Name) -> NameEvidence:
         compact=max((e.compact for e in evidence), default=Decimal(0)),
         token=max((e.token for e in evidence), default=Decimal(0)),
         transliterated=max((e.transliterated for e in evidence), default=Decimal(0)),
+        edit=max((e.edit for e in evidence), default=Decimal(0)),
     )

@@ -7,7 +7,7 @@ from structuraguard.contracts.database import ColumnCatalog
 from structuraguard.contracts.mapping_rules import MappingIssueLocation
 from structuraguard.contracts.profiling import NormalizedFieldProfile
 
-from ._compatibility import type_compatibility
+from ._compatibility import null_text_compatible, type_compatibility
 from ._validation_report import Issues
 
 
@@ -96,6 +96,8 @@ def check_type(
             )
         ):
             issues.add("MAPPING_TYPE_UNVERIFIED", location)
+        if null_text_compatible(profile, column):
+            return
     else:
         kinds = (
             {semantic_type}

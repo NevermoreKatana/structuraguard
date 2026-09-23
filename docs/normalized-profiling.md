@@ -47,6 +47,13 @@ field_name)`. Полный DTO сериализуется в JSON, но може
 raw values, identifiers/labels, examples, extrema или fingerprints. `repr`
 профильных DTO также не раскрывает их содержимое.
 
+Публичный `SDK.profile_records()` добавляет `source_names` из заголовка CSV или
+прямого literal key JSON, выбранного проверенным ParsePlan. Привязка сохраняет
+source/extraction/plan fingerprints; semantic IDs (`email_0`, `field_0`) не
+меняются. Неоднозначные имена, вложенные пути и labels длиннее 256 UTF-8 bytes
+не превращаются в угаданные или обрезанные aliases. Самостоятельный
+`NormalizedDataProfiler` по-прежнему принимает labels через явный context.
+
 Канонические требования: [FR-013][spec-fr-013],
 [§11.4 — совместимость типов][spec-types], [§11.5 — анализ значений][spec-values],
 [§11.6 — структурный контекст][spec-context],

@@ -123,7 +123,15 @@ non-writable, system и запрещённые scope targets в writable candida
 
 Модель возвращает `SemanticMappingDecision`: обязательные `schema_version`,
 `group_id`, `candidate_set_fingerprint`, `tables`, `columns`, `relations`,
-`review_required`. Каждый source имеет полный список `assessments` переданных
+`review_required`. В prompt версии 1.3.0 варианты называются `column_candidates`, `table_candidates`
+и `relation_candidates`, чтобы не смешивать их с решениями ответа. У каждого
+`fields`/`entities` перечислены допустимые `candidate_ids`. `fields.name` показывает
+единственное проверенное исходное имя, если оно известно; `semantic_field_name`
+сохраняет внутреннее имя SDK, а `source_id` остаётся адресом выбора. Один исходный
+field требует ровно одного объекта в `columns` ответа, независимо от числа его
+кандидатов. Ответ запрашивается как компактный JSON; его строгая валидация прежняя.
+
+Каждый source имеет полный список `assessments` переданных
 ему candidates, status `selected/ambiguous/unmapped` и закрытый `reason_code`.
 Для колонок и связей выбор один или null; для таблиц `selected_candidate_ids`
 допускает несколько значений. Scores — строки `0.000000`–`1.000000` с шестью
@@ -191,8 +199,20 @@ scanner, закрытая schema и membership checks независимо от 
 SDK использует `D` — исходный M9 base score и `L` — LLM signal:
 `score = clamp((1 − λ) × D + λ × L − A − V − S, 0, 1)`.
 D включает name, alias, type, value pattern, structural context и FK graph signals
-с их весами M9. Default λ=0.20, ceiling 0.30; модель не задаёт итоговый score.
-Исходные M9 signals/explanations сохраняются отдельно.
+с их весами M9. Default λ=1: проверенное семантическое соответствие может
+разрешить разные названия полей, даже когда lexical score низкий. Для прежней
+консервативной смеси задайте `llm_weight=Decimal("0.20")` явно; диапазон 0–1.
+Исходные M9 signals/explanations сохраняются отдельно. Модель оценивает каждый
+разрешённый candidate; один произвольный self-confidence не принимается.
+Все blockers, конкуренты, пороги и обязательная M11 validation сохраняются.
+Если top-k скрыл конкурента, λ=1 не допускает автоматического выбора.
+
+Оркестратор принимает эти настройки через
+`SDKDependencies(semantic_mapping=SemanticMappingOptions(...))`. Принятые SDK
+semantic scores сохраняются в `FieldMapping.confidence`; общий `MappingPlan`
+учитывает также минимум оценок выбранных таблиц/связей. Низкая lexical оценка
+после принятого семантического решения повторно не подменяет confidence.
+Изменение default policy описано в [ADR 0035](adr/0035-semantic-name-acceptance.md).
 
 | Штраф SDK | Default | Evidence |
 |---|---|---|
