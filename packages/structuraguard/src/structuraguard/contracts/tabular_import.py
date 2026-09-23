@@ -96,11 +96,33 @@ class _TabularOperation(SensitiveMappingContract):
     reason: TabularReason
 
 
-class TabularImportChoice(_TabularOperation):
-    """Wire-выбор LLM только по aliases из переданного bounded payload."""
-
+class _TabularWireChoice(_TabularOperation):
     target_id: TabularTargetId
     confidence: TabularWireScore
+
+
+class TabularCopyChoice(_TabularWireChoice):
+    """Скопировать целое значение: параметры разделения в wire всегда null."""
+
+    operation: Literal["copy"]
+    split_mode: None
+    delimiter: None
+    part_index: None
+    part_count: None
+
+
+class TabularSplitChoice(_TabularWireChoice):
+    """Одна часть разделения; остальные части проверяются binder по source_id."""
+
+    operation: Literal["split"]
+    split_mode: Literal["whitespace", "literal"]
+    part_index: Annotated[NonNegativeInt, Field(le=7)]
+    part_count: Annotated[PositiveInt, Field(ge=2, le=8)]
+
+
+type TabularImportChoice = Annotated[
+    TabularCopyChoice | TabularSplitChoice, Field(discriminator="operation")
+]
 
 
 class TabularImportSuggestion(SensitiveMappingContract):

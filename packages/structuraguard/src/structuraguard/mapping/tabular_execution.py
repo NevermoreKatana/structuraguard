@@ -22,7 +22,11 @@ from structuraguard.contracts.tabular_import import (
     TabularImportSuggestion,
 )
 from structuraguard.domain.database_fingerprint import verify_database_fingerprint
-from structuraguard.exceptions import MappingError, StructuraGuardError
+from structuraguard.exceptions import (
+    ErrorDetailInput,
+    MappingError,
+    StructuraGuardError,
+)
 
 from ._validation_scope import required
 
@@ -41,6 +45,8 @@ def _failure(
     actual_parts: int | None = None,
     actual_confidence: Decimal | None = None,
     min_confidence: Decimal | None = None,
+    actual: dict[str, ErrorDetailInput] | None = None,
+    expected: dict[str, ErrorDetailInput] | None = None,
 ) -> TabularImportError:
     return TabularImportError(
         error_code=code,
@@ -58,8 +64,21 @@ def _failure(
             "min_confidence": str(min_confidence)
             if min_confidence is not None
             else None,
+            "actual": actual,
+            "expected": expected,
         },
     )
+
+
+def _operation_parameters(item: TabularImportAssignment) -> dict[str, ErrorDetailInput]:
+    """Закрытые параметры допустимы в диагностике; содержимое delimiter скрыто."""
+    return {
+        "operation": item.operation,
+        "split_mode": item.split_mode,
+        "delimiter_supplied": item.delimiter is not None,
+        "part_index": item.part_index,
+        "part_count": item.part_count,
+    }
 
 
 def _catalog(
@@ -240,7 +259,23 @@ def _assignments(
                     first.part_count,
                 )
             ):
-                raise _failure("TABULAR_IMPORT_OPERATION_INVALID", source_id=source_id)
+                raise _failure(
+                    "TABULAR_IMPORT_OPERATION_INVALID",
+                    source_id=source_id,
+                    target=first.target,
+                    actual={
+                        **_operation_parameters(first),
+                        "assignment_count": len(items),
+                    },
+                    expected={
+                        "operation": "copy",
+                        "split_mode": None,
+                        "delimiter_supplied": False,
+                        "part_index": None,
+                        "part_count": None,
+                        "assignment_count": 1,
+                    },
+                )
             continue
         signature = (first.split_mode, first.delimiter, first.part_count)
         if (
@@ -257,7 +292,28 @@ def _assignments(
             or len(items) != first.part_count
             or {item.part_index for item in items} != set(range(first.part_count))
         ):
-            raise _failure("TABULAR_IMPORT_SPLIT_COVERAGE", source_id=source_id)
+            raise _failure(
+                "TABULAR_IMPORT_SPLIT_COVERAGE",
+                source_id=source_id,
+                expected_parts=first.part_count,
+                actual_parts=len(items),
+                actual={
+                    "assignment_count": len(items),
+                    "part_indices": tuple(item.part_index for item in items),
+                    "assignments": tuple(
+                        _operation_parameters(item) for item in items[:8]
+                    ),
+                },
+                expected={
+                    "operation": "split",
+                    "split_mode": first.split_mode,
+                    "part_count": first.part_count,
+                    "assignment_count": first.part_count,
+                    "part_indices": tuple(range(first.part_count))
+                    if first.part_count
+                    else (),
+                },
+            )
     return grouped
 
 

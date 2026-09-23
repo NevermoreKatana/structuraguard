@@ -1,5 +1,6 @@
 """Семантические aliases и разделение значений до стандартного ingest."""
 
+from collections.abc import Mapping
 from decimal import Decimal
 
 import pytest
@@ -8,10 +9,12 @@ from tests.fakes.mapping import catalog, column, scope_for, table
 from structuraguard.contracts.database import DatabaseCatalog
 from structuraguard.contracts.deterministic_mapping import MappingScope
 from structuraguard.contracts.tabular_import import (
+    TabularCopyChoice,
     TabularImportChoice,
     TabularImportPlan,
     TabularImportSource,
     TabularImportSuggestion,
+    TabularSplitChoice,
 )
 from structuraguard.mapping.tabular_execution import (
     TabularImportError,
@@ -39,8 +42,8 @@ def sample() -> tuple[
         ref.column_id: f"c{i}"
         for i, ref in enumerate(tabular_import_targets(db, scope))
     }
-    choices = (
-        TabularImportChoice(
+    choices: tuple[TabularImportChoice, ...] = (
+        TabularCopyChoice(
             source_id="s0",
             target_id=aliases["postal_code"],
             operation="copy",
@@ -52,7 +55,7 @@ def sample() -> tuple[
             reason="semantic_name",
         ),
         *(
-            TabularImportChoice(
+            TabularSplitChoice(
                 source_id="s1",
                 target_id=aliases[name],
                 operation="split",
@@ -129,7 +132,6 @@ def test_split_must_fit_all_rows_without_dropping_parts(raw: str) -> None:
         ("unknown_source", "TABULAR_IMPORT_SOURCE_UNKNOWN"),
         ("low_confidence", "TABULAR_IMPORT_CONFIDENCE_LOW"),
         ("ambiguous", "TABULAR_IMPORT_NEEDS_REVIEW"),
-        ("mixed_operations", "TABULAR_IMPORT_SPLIT_COVERAGE"),
     ],
 )
 def test_unsafe_or_partial_plan_is_rejected(kind: str, code: str) -> None:
@@ -150,8 +152,6 @@ def test_unsafe_or_partial_plan_is_rejected(kind: str, code: str) -> None:
         assignments[0]["confidence"] = Decimal("0.84")
     elif kind == "ambiguous":
         data["decision"] = "ambiguous"
-    elif kind == "mixed_operations":
-        assignments[2]["operation"] = "copy"
     data["assignments"] = assignments
     with pytest.raises(TabularImportError, match=code):
         bind_tabular_import_plan(
@@ -238,7 +238,7 @@ def test_general_composite_value_splits_into_city_and_country() -> None:
         confidence=Decimal("0.98"),
         reason="semantic_equivalence",
         assignments=tuple(
-            TabularImportChoice(
+            TabularSplitChoice(
                 source_id="s0",
                 target_id=f"c{i}",
                 operation="split",
@@ -277,3 +277,45 @@ def test_low_confidence_points_to_assignment_before_overall_plan() -> None:
     assert error.value.details["source_id"] == "s0"
     assert error.value.details["actual_confidence"] == "0.8"
     assert error.value.details["min_confidence"] == "0.85"
+
+
+@pytest.mark.parametrize(
+    "kind", ["copy_parameters", "missing_split_part", "mixed_split_operations"]
+)
+def test_operation_diagnostics_show_closed_parameters_without_raw_values(
+    kind: str,
+) -> None:
+    source, db, scope, suggestion = sample()
+    plan = bind_tabular_import_plan(source, db, scope, suggestion)
+    wire = plan.model_dump(exclude={"fingerprint"})
+    if kind == "copy_parameters":
+        wire["assignments"][0]["part_index"] = 0
+        wire["assignments"][0]["delimiter"] = "canary"
+    elif kind == "missing_split_part":
+        wire["assignments"] = wire["assignments"][:-1]
+    else:
+        wire["assignments"][2]["operation"] = "copy"
+    invalid = TabularImportPlan.model_validate(wire)
+    with pytest.raises(TabularImportError) as captured:
+        execute_tabular_import(source.labels, source.rows, db, scope, invalid)
+    details = captured.value.details
+    actual, expected = details["actual"], details["expected"]
+    assert isinstance(actual, Mapping) and isinstance(expected, Mapping)
+    if kind == "copy_parameters":
+        assert captured.value.error_code == "TABULAR_IMPORT_OPERATION_INVALID"
+        assert actual["part_index"] == 0 and expected["part_index"] is None
+        assert actual["delimiter_supplied"] is True
+        assert expected["delimiter_supplied"] is False
+    elif kind == "missing_split_part":
+        assert captured.value.error_code == "TABULAR_IMPORT_SPLIT_COVERAGE"
+        assert details["expected_parts"] == 2 and details["actual_parts"] == 1
+        assert actual["part_indices"] == (1,)
+        assert expected["part_indices"] == (0, 1)
+    else:
+        assert captured.value.error_code == "TABULAR_IMPORT_SPLIT_COVERAGE"
+        parameters = actual["assignments"]
+        assert isinstance(parameters, tuple)
+        assert isinstance(parameters[1], Mapping)
+        assert parameters[1]["operation"] == "copy"
+        assert expected["operation"] == "split"
+    assert "canary" not in str(details) and "Иванов Иван" not in str(details)

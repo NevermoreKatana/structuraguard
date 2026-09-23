@@ -239,6 +239,38 @@ async def test_model_output_is_not_repaired_or_filled_with_default_fields() -> N
         )
 
 
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"part_index": 0},
+        {"part_count": 2},
+        {"delimiter": "|"},
+        {"split_mode": "whitespace"},
+        {
+            "operation": "split",
+            "split_mode": "whitespace",
+            "part_index": 0,
+            "part_count": 1,
+        },
+        {"operation": "split", "split_mode": "whitespace", "part_count": 2},
+    ],
+)
+async def test_wire_schema_rejects_inconsistent_copy_and_split_parameters(
+    changes: dict[str, object],
+) -> None:
+    db = catalog(table("t", column("postal_code")))
+    body = json.loads(output(target="c0"))
+    body["assignments"][0].update(changes)
+    sdk, _ = planner(canonical_json_value(body))
+    with pytest.raises(LLMProviderError, match="LLM_SCHEMA_VIOLATION"):
+        await sdk.plan(
+            labels=("Индекс",),
+            rows=({"Индекс": "666333"},),
+            catalog=db,
+            scope=scope_for(db),
+        )
+
+
 async def test_scanner_approval_must_bind_the_exact_outbound_payload() -> None:
     class WrongBindingScanner(RecordingScanner):
         async def scan(self, request: SecurityScanRequest) -> SecurityReport:
@@ -289,3 +321,45 @@ def test_new_registry_entries_have_closed_schema_and_value_semantics_prompt() ->
     assert prompt.prompt_id == "tabular_import_planning"
     assert "real sample values" in prompt.text
     assert "none were filtered by name similarity" in prompt.text
+
+
+def test_schema_branches_force_null_copy_parameters_and_complete_split_parameters() -> (
+    None
+):
+    registered = tabular_import_response_schema()
+    schema = json.loads(registered.schema_json)
+    assert registered.version == "1.1.0"
+    item = schema["properties"]["assignments"]["items"]
+    if "$ref" in item:
+        item = schema["$defs"][item["$ref"].rsplit("/", 1)[1]]
+    assert item["discriminator"]["propertyName"] == "operation"
+    assert len(item["oneOf"]) == 2
+    copy = schema["$defs"]["TabularCopyChoice"]["properties"]
+    assert copy["operation"]["const"] == "copy"
+    for key in ("split_mode", "delimiter", "part_index", "part_count"):
+        assert copy[key]["type"] == "null"
+    split = schema["$defs"]["TabularSplitChoice"]["properties"]
+    assert split["operation"]["const"] == "split"
+    assert split["part_count"]["minimum"] == 2
+    assert split["part_index"]["type"] == "integer"
+    assert split["split_mode"]["enum"] == ["whitespace", "literal"]
+
+
+def test_prompt_contains_full_valid_copy_plus_two_part_split_example() -> None:
+    prompt = tabular_import_prompt()
+    assert prompt.version == "1.1.0"
+    assert "NOT source fields" in prompt.text
+    assert "part_index 0 AND 1" in prompt.text
+    start = prompt.text.index('{"decision":"map"')
+    example, _ = json.JSONDecoder().raw_decode(prompt.text[start:])
+    tabular_import_response_schema().validate(canonical_json_value(example))
+    assert len(example["assignments"]) == 3
+    copy, first, second = example["assignments"]
+    assert all(
+        copy[key] is None
+        for key in ("split_mode", "delimiter", "part_index", "part_count")
+    )
+    assert first["source_id"] == second["source_id"] != copy["source_id"]
+    assert {first["part_index"], second["part_index"]} == {0, 1}
+    assert first["part_count"] == second["part_count"] == 2
+    assert first["target_id"] != second["target_id"]
