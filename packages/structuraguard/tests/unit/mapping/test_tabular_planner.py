@@ -342,12 +342,13 @@ def test_schema_branches_force_null_copy_parameters_and_complete_split_parameter
 ):
     registered = tabular_import_response_schema()
     schema = json.loads(registered.schema_json)
-    assert registered.version == "1.2.0"
+    assert registered.version == "1.3.0"
     item = schema["properties"]["assignments"]["items"]
     if "$ref" in item:
         item = schema["$defs"][item["$ref"].rsplit("/", 1)[1]]
     assert len(item["anyOf"]) == 3
     copy = schema["$defs"]["TabularCopyChoice"]["properties"]
+    assert list(copy)[:3] == ["source_id", "target_id", "operation"]
     assert copy["operation"]["const"] == "copy"
     for key in ("split_mode", "delimiter", "part_index", "part_count"):
         assert copy[key]["type"] == "null"

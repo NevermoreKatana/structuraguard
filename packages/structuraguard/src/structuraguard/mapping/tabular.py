@@ -130,7 +130,7 @@ def tabular_import_response_schema() -> LLMResponseSchema:
     """Вернуть закрытую схему выбора; проверку каталога выполняет SDK binder."""
     return LLMResponseSchema(
         schema_id="tabular-import-suggestion",
-        version="1.2.0",
+        version="1.3.0",
         model=TabularImportSuggestion,
     )
 

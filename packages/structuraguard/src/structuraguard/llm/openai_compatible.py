@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import re
 import time
 from collections import deque
@@ -386,7 +387,7 @@ class OpenAICompatibleProvider:
             }
         )
         messages.append({"role": "user", "content": request.payload_json})
-        body = canonical_json_value(
+        body = json.dumps(
             {
                 "model": caps.model_id,
                 "messages": messages,
@@ -394,7 +395,10 @@ class OpenAICompatibleProvider:
                 "temperature": 0,
                 "max_tokens": caps.max_output_tokens,
                 "stream": False,
-            }
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
         ).encode()
         assert (
             caps.max_input_tokens is not None

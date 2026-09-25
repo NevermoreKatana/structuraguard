@@ -7,7 +7,6 @@ from pydantic import Field, StrictStr
 
 from structuraguard.contracts._base import (
     FrozenContract,
-    canonical_json_value,
     canonical_sha256_value,
 )
 from structuraguard.contracts.common import ParserIdentifierStr, SchemaVersionStr
@@ -85,7 +84,12 @@ class LLMResponseSchema:
         _check_schema(schema)
         if schema.get("type") != "object":
             raise ValueError("Response schema требует root object")
-        encoded = canonical_json_value(schema)
+        # Декодеры строят последовательную грамматику по порядку properties.
+        # Сортировка ставила confidence/delimiter раньше source_id/operation.
+        # Для identity остаётся канонический hash, для генерации — порядок DTO.
+        encoded = json.dumps(
+            schema, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
         if len(encoded.encode()) > 65536:
             raise ValueError("Response schema превышает byte limit")
         object.__setattr__(self, "schema_json", encoded)

@@ -99,6 +99,7 @@ async def test_http_runs_shared_contract_and_separates_untrusted_input(
     provider = provider_for(httpx.MockTransport(handle), native_schema=native_schema)
     with pytest.raises(LLMProviderError, match="LLM_UNAVAILABLE"):
         await provider.generate_structured(request_for())
+
     async with provider:
         await assert_llm_provider_contract(
             LLMProviderContractCase(
@@ -119,6 +120,53 @@ async def test_http_runs_shared_contract_and_separates_untrusted_input(
     assert provider.calls[0].prompt.fingerprint == digest("prompt v1")
     with pytest.raises(LLMProviderError, match="LLM_UNAVAILABLE"):
         await provider.generate_structured(request_for())
+
+
+@pytest.mark.anyio
+async def test_native_schema_keeps_declared_generation_order_through_http() -> None:
+    from structuraguard.contracts._base import canonical_sha256_value
+
+    class OrderedResult(FrozenContract):
+        source_id: str
+        target_id: str
+        operation: str
+        confidence: str
+
+    schema = LLMResponseSchema(
+        schema_id="test-result", version="1.0.0", model=OrderedResult
+    )
+    order = ["source_id", "target_id", "operation", "confidence"]
+    assert schema.fingerprint == canonical_sha256_value(json.loads(schema.schema_json))
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        wire = json.loads(request.content)
+        properties = wire["response_format"]["json_schema"]["schema"]["properties"]
+        assert list(properties) == order
+        system_schema = json.loads(
+            wire["messages"][1]["content"].split("schema: ", 1)[1]
+        )
+        assert list(system_schema["properties"]) == order
+        return reply(
+            '{"source_id":"s0","target_id":"c0","operation":"copy","confidence":".99"}'
+        )
+
+    async with OpenAICompatibleProvider(
+        config=OpenAICompatibleConfig(
+            endpoint="http://127.0.0.1:9999/v1/chat/completions",
+            capabilities=capabilities(),
+        ),
+        prompts=(
+            LLMPromptTemplate(
+                prompt_id="semantic_parse_plan", version="1.0.0", text="prompt v1"
+            ),
+        ),
+        schemas=(schema,),
+        transport=httpx.MockTransport(handle),
+        clock=fixed_clock,
+        monotonic=lambda: 0.0,
+    ) as provider:
+        result = await provider.generate_structured(request_for())
+    assert json.loads(result.output_json)["operation"] == "copy"
 
 
 @pytest.mark.anyio

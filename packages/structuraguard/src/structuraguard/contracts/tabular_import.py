@@ -96,8 +96,17 @@ class _TabularOperation(SensitiveMappingContract):
     reason: TabularReason
 
 
-class _TabularWireChoice(_TabularOperation):
+class _TabularWireChoice(SensitiveMappingContract):
+    """Сначала модель выбирает источник и цель, потом правило и его оценку."""
+
+    source_id: TabularSourceId
     target_id: TabularTargetId
+    operation: Literal["copy", "split"]
+    split_mode: Literal["whitespace", "literal"] | None
+    delimiter: Annotated[StrictStr, Field(min_length=1, max_length=8)] | None
+    part_count: Annotated[PositiveInt, Field(le=8)] | None
+    part_index: Annotated[NonNegativeInt, Field(le=7)] | None
+    reason: TabularReason
     confidence: TabularWireScore
 
 
