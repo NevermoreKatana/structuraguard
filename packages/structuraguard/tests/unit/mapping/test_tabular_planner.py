@@ -110,7 +110,9 @@ async def test_cyrillic_semantics_receive_real_values_and_all_scoped_columns() -
     assert plan.assignments[0].target.column_id == "postal_code"
     assert plan.assignments[0].confidence == Decimal(".98")
     payload = json.loads(scanner.payloads[0])
-    assert payload["source_fields"] == [{"source_id": "s0", "label": "Индекс"}]
+    assert payload["source_fields"] == [
+        {"source_id": "s0", "label": "Индекс", "split_candidates": []}
+    ]
     assert payload["sample_rows"][0]["values"] == {"s0": "666333"}
     assert {c["column"] for c in payload["target_columns"]} == {
         "account_id",
@@ -141,7 +143,7 @@ async def test_split_runs_exact_operation_for_every_row() -> None:
         for i in range(2)
     ]
     body["reason"] = "split_name"
-    sdk, _ = planner(canonical_json_value(body))
+    sdk, scanner = planner(canonical_json_value(body))
     rows: tuple[dict[str, str | None], ...] = (
         {"Фамилия_имя": "Иванов Иван"},
         {"Фамилия_имя": "Петров   Пётр"},
@@ -153,6 +155,19 @@ async def test_split_runs_exact_operation_for_every_row() -> None:
     assert result.rows[1] == {"family_name": "Петров", "given_name": "Пётр"}
     assert result.preview[0].before == rows[0]
     assert len(result.lineage) == 2
+    candidates = json.loads(scanner.payloads[0])["source_fields"][0]["split_candidates"]
+    assert candidates == [
+        {
+            "operation": "split",
+            "split_mode": "whitespace",
+            "delimiter": None,
+            "part_count": 2,
+            "parts": [
+                {"part_index": 0, "example": "Иванов"},
+                {"part_index": 1, "example": "Иван"},
+            ],
+        }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -369,7 +384,7 @@ def test_prompt_distinguishes_compound_labels_from_values_without_example_bias()
     None
 ):
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.6.0"
+    assert prompt.version == "1.7.0"
     assert "NOT source fields" in prompt.text
     assert "part_index 0 AND 1" in prompt.text
     assert "compound LABEL is not evidence of a compound VALUE" in prompt.text
@@ -440,6 +455,7 @@ async def test_replans_hallucinated_postal_split_with_bound_validation_feedback(
     }
     assert second["rejected_plan"]["assignments"][1]["operation"] == "split"
     assert all(second[key] == value for key, value in first.items())
+    assert first["source_fields"][1]["split_candidates"] == []
     assert (
         scanner.requests[0].payload_fingerprint
         != scanner.requests[1].payload_fingerprint
@@ -572,3 +588,36 @@ async def test_missing_required_column_feedback_uses_model_alias_not_database_id
         "code": "TABULAR_IMPORT_REQUIRED_TARGET_MISSING",
         "target_id": "c1",
     }
+
+
+async def test_literal_split_evidence_comes_from_values_not_source_label() -> None:
+    db = catalog(table("places", column("city"), column("country", position=1)))
+    body = json.loads(output())
+    base = body["assignments"][0]
+    body["assignments"] = [
+        {
+            **base,
+            "target_id": f"c{index}",
+            "operation": "split",
+            "split_mode": "literal",
+            "delimiter": "|",
+            "part_count": 2,
+            "part_index": index,
+        }
+        for index in range(2)
+    ]
+    sdk, scanner = planner(canonical_json_value(body))
+    rows: tuple[dict[str, str | None], ...] = (
+        {"Место": "Казань|Россия"},
+        {"Место": "Москва|Россия"},
+    )
+    plan = await sdk.plan(labels=("Место",), rows=rows, catalog=db, scope=scope_for(db))
+    candidates = json.loads(scanner.payloads[0])["source_fields"][0]["split_candidates"]
+    assert candidates[0]["delimiter"] == "|"
+    assert candidates[0]["parts"] == [
+        {"part_index": 0, "example": "Казань"},
+        {"part_index": 1, "example": "Россия"},
+    ]
+    assert execute_tabular_import(("Место",), rows, db, scope_for(db), plan).rows[
+        1
+    ] == {"city": "Москва", "country": "Россия"}
