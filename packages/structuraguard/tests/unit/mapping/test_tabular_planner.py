@@ -368,13 +368,17 @@ def test_prompt_distinguishes_compound_labels_from_values_without_example_bias()
     None
 ):
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.5.0"
+    assert prompt.version == "1.6.0"
     assert "NOT source fields" in prompt.text
     assert "part_index 0 AND 1" in prompt.text
     assert "compound LABEL is not evidence of a compound VALUE" in prompt.text
     assert "validation_feedback" in prompt.text
     assert '"assignments":[' not in prompt.text
     assert "EXACTLY ONE assignment" in prompt.text
+    assert (
+        "Both component columns must be populated even if they are nullable"
+        in prompt.text
+    )
 
 
 def postal_answer(*, hallucinated_split: bool) -> str:
