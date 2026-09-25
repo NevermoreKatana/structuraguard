@@ -368,7 +368,7 @@ def test_prompt_distinguishes_compound_labels_from_values_without_example_bias()
     None
 ):
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.4.0"
+    assert prompt.version == "1.5.0"
     assert "NOT source fields" in prompt.text
     assert "part_index 0 AND 1" in prompt.text
     assert "compound LABEL is not evidence of a compound VALUE" in prompt.text
@@ -535,3 +535,35 @@ async def test_duplicate_copy_is_replanned_instead_of_filling_optional_columns()
     assert feedback["code"] == "TABULAR_IMPORT_OPERATION_INVALID"
     assert feedback["actual"]["assignment_count"] == 2
     assert feedback["expected"]["assignment_count"] == 1
+
+
+async def test_missing_required_column_feedback_uses_model_alias_not_database_id() -> (
+    None
+):
+    db = catalog(
+        table(
+            "contacts",
+            column("city"),
+            column("email", position=1).model_copy(update={"nullable": False}),
+            column("postal_code", position=2),
+        )
+    )
+    good = postal_answer(hallucinated_split=False)
+    wrong = json.loads(good)
+    wrong["assignments"][0]["target_id"] = "c0"
+    sdk, scanner = planner(canonical_json_value(wrong), good)
+    labels = ("почта", "почтовый_код")
+    rows: tuple[dict[str, str | None], ...] = (
+        {"почта": "ann1a@example.test", "почтовый_код": "101000"},
+    )
+    plan = await sdk.plan(labels=labels, rows=rows, catalog=db, scope=scope_for(db))
+    assert (
+        execute_tabular_import(labels, rows, db, scope_for(db), plan).rows[0]["email"]
+        == "ann1a@example.test"
+    )
+    first, second = (json.loads(p) for p in scanner.payloads)
+    assert first["required_target_ids"] == ["c1"]
+    assert second["validation_feedback"] == {
+        "code": "TABULAR_IMPORT_REQUIRED_TARGET_MISSING",
+        "target_id": "c1",
+    }
