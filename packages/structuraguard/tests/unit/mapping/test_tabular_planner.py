@@ -56,12 +56,12 @@ def output(*, score: str = "0.980000", target: str = "c1") -> str:
 
 def planner(
     answer: str = "{}",
-    *,
+    *more_answers: str,
     mode: LLMRoutingMode = LLMRoutingMode.LOCAL_ONLY,
     cloud: bool = False,
     options: TabularImportOptions | None = None,
 ) -> tuple[TabularImportPlanner, RecordingScanner]:
-    provider = fake_provider(answer)
+    provider = fake_provider(answer, *more_answers)
     if cloud:
         from tests.fakes.llm import fixed_clock
 
@@ -364,21 +364,144 @@ def test_schema_branches_force_null_copy_parameters_and_complete_split_parameter
     assert literal["delimiter"]["maxLength"] == 8
 
 
-def test_prompt_contains_full_valid_copy_plus_two_part_split_example() -> None:
+def test_prompt_distinguishes_compound_labels_from_values_without_example_bias() -> (
+    None
+):
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.2.0"
+    assert prompt.version == "1.3.0"
     assert "NOT source fields" in prompt.text
     assert "part_index 0 AND 1" in prompt.text
-    start = prompt.text.index('{"decision":"map"')
-    example, _ = json.JSONDecoder().raw_decode(prompt.text[start:])
-    tabular_import_response_schema().validate(canonical_json_value(example))
-    assert len(example["assignments"]) == 3
-    copy, first, second = example["assignments"]
-    assert all(
-        copy[key] is None
-        for key in ("split_mode", "delimiter", "part_index", "part_count")
+    assert "compound LABEL is not evidence of a compound VALUE" in prompt.text
+    assert "validation_feedback" in prompt.text
+    assert '"assignments":[' not in prompt.text
+
+
+def postal_answer(*, hallucinated_split: bool) -> str:
+    body = json.loads(output(target="c1"))
+    copy = body["assignments"][0]
+    if hallucinated_split:
+        body["assignments"] += [
+            {
+                **copy,
+                "source_id": "s1",
+                "target_id": target,
+                "operation": "split",
+                "split_mode": "literal",
+                "delimiter": "|",
+                "part_index": index,
+                "part_count": 2,
+                "reason": "composite_component",
+            }
+            for index, target in enumerate(("c2", "c0"))
+        ]
+    else:
+        body["assignments"].append({**copy, "source_id": "s1", "target_id": "c2"})
+    return canonical_json_value(body)
+
+
+async def test_replans_hallucinated_postal_split_with_bound_validation_feedback() -> (
+    None
+):
+    db = catalog(
+        table(
+            "contacts",
+            column("city"),
+            column("email", position=1),
+            column("postal_code", position=2),
+        )
     )
-    assert first["source_id"] == second["source_id"] != copy["source_id"]
-    assert {first["part_index"], second["part_index"]} == {0, 1}
-    assert first["part_count"] == second["part_count"] == 2
-    assert first["target_id"] != second["target_id"]
+    labels = ("почта", "почтовый_код")
+    rows: tuple[dict[str, str | None], ...] = (
+        {"почта": "ann1a@example.test", "почтовый_код": "101000"},
+        {"почта": "iva1@example.test", "почтовый_код": "420000"},
+        {"почта": "mar1ia@example.test", "почтовый_код": "190000"},
+    )
+    sdk, scanner = planner(
+        postal_answer(hallucinated_split=True), postal_answer(hallucinated_split=False)
+    )
+    plan = await sdk.plan(labels=labels, rows=rows, catalog=db, scope=scope_for(db))
+    result = execute_tabular_import(labels, rows, db, scope_for(db), plan)
+    assert result.rows == tuple(
+        {"email": row["почта"], "postal_code": row["почтовый_код"]} for row in rows
+    )
+    first, second = (json.loads(p) for p in scanner.payloads)
+    assert second["validation_feedback"] == {
+        "code": "TABULAR_IMPORT_SPLIT_PART_COUNT",
+        "source_id": "s1",
+        "row_index": 1,
+        "expected_parts": 2,
+        "actual_parts": 1,
+    }
+    assert second["rejected_plan"]["assignments"][1]["operation"] == "split"
+    assert all(second[key] == value for key, value in first.items())
+    assert (
+        scanner.requests[0].payload_fingerprint
+        != scanner.requests[1].payload_fingerprint
+    )
+    assert scanner.requests[0].request_id != scanner.requests[1].request_id
+
+
+async def test_repeated_bad_split_stops_after_two_plans_without_relaxing_validation() -> (
+    None
+):
+    db = catalog(
+        table(
+            "contacts",
+            column("city"),
+            column("email", position=1),
+            column("postal_code", position=2),
+        )
+    )
+    bad = postal_answer(hallucinated_split=True)
+    sdk, scanner = planner(bad, bad, postal_answer(hallucinated_split=False))
+    with pytest.raises(
+        TabularImportError, match="TABULAR_IMPORT_SPLIT_PART_COUNT"
+    ) as error:
+        await sdk.plan(
+            labels=("почта", "почтовый_код"),
+            rows=({"почта": "ann1a@example.test", "почтовый_код": "101000"},),
+            catalog=db,
+            scope=scope_for(db),
+        )
+    assert len(scanner.requests) == 2
+    assert error.value.details["planning_attempts"] == 2
+    assert error.value.details["plan_origin"] == "llm"
+    assert error.value.details["actual_parts"] == 1
+
+
+async def test_replanning_requires_new_exact_scanner_approval() -> None:
+    class StaleApprovalScanner(RecordingScanner):
+        async def scan(self, request: SecurityScanRequest) -> SecurityReport:
+            report = await super().scan(request)
+            if len(self.requests) > 1:
+                return report.model_copy(
+                    update={
+                        "payload_fingerprint": self.requests[0].payload_fingerprint,
+                    }
+                )
+            return report
+
+    provider = fake_provider(
+        postal_answer(hallucinated_split=True), postal_answer(hallucinated_split=False)
+    )
+    sdk = TabularImportPlanner(
+        router=router_for(provider, mode=LLMRoutingMode.LOCAL_ONLY),
+        scanner=StaleApprovalScanner(),
+        context=SemanticMappingContext(run_id="mapping-run"),
+    )
+    db = catalog(
+        table(
+            "contacts",
+            column("city"),
+            column("email", position=1),
+            column("postal_code", position=2),
+        )
+    )
+    with pytest.raises(LLMProviderError, match="LLM_POLICY_DENIED"):
+        await sdk.plan(
+            labels=("почта", "почтовый_код"),
+            rows=({"почта": "ann1a@example.test", "почтовый_код": "101000"},),
+            catalog=db,
+            scope=scope_for(db),
+        )
+    assert provider.call_count == 1
