@@ -35,6 +35,7 @@ def output(*, score: str = "0.980000", target: str = "c1") -> str:
     return canonical_json_value(
         {
             "decision": "map",
+            "omissions": [],
             "confidence": score,
             "reason": "semantic_name",
             "assignments": [
@@ -122,6 +123,33 @@ async def test_cyrillic_semantics_receive_real_values_and_all_scoped_columns() -
     result = execute_tabular_import(("Индекс",), rows, db, scope_for(db), plan)
     assert result.rows == ({"postal_code": "666333"}, {"postal_code": "001234"})
     assert result.lineage[0].source_name == "Индекс"
+
+
+async def test_model_explicitly_omits_unmatched_metadata_with_confidence() -> None:
+    db = catalog(table("contacts", column("postal_code")))
+    rows: tuple[dict[str, str | None], ...] = (
+        {"Индекс": "001234", "instance": "synthetic-worker"},
+    )
+    answer = json.loads(output(target="c0"))
+    answer["omissions"] = [
+        {
+            "source_id": "s1",
+            "reason": "no_target_column",
+            "confidence": "0.98",
+        }
+    ]
+    sdk, scanner = planner(canonical_json_value(answer))
+    plan = await sdk.plan(
+        labels=("Индекс", "instance"), rows=rows, catalog=db, scope=scope_for(db)
+    )
+    assert len(scanner.requests) == 1
+    assert plan.omissions[0].source_id == "s1"
+    result = execute_tabular_import(
+        ("Индекс", "instance"), rows, db, scope_for(db), plan
+    )
+    assert result.rows == ({"postal_code": "001234"},)
+    assert result.preview[0].omitted == {"instance": "synthetic-worker"}
+    assert result.omissions[0].reason == "no_target_column"
 
 
 async def test_split_runs_exact_operation_for_every_row() -> None:
@@ -357,7 +385,7 @@ def test_schema_branches_force_null_copy_parameters_and_complete_split_parameter
 ):
     registered = tabular_import_response_schema()
     schema = json.loads(registered.schema_json)
-    assert registered.version == "1.3.0"
+    assert registered.version == "1.4.0"
     item = schema["properties"]["assignments"]["items"]
     if "$ref" in item:
         item = schema["$defs"][item["$ref"].rsplit("/", 1)[1]]
@@ -384,7 +412,7 @@ def test_prompt_distinguishes_compound_labels_from_values_without_example_bias()
     None
 ):
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.7.0"
+    assert prompt.version == "1.8.0"
     assert "NOT source fields" in prompt.text
     assert "part_index 0 AND 1" in prompt.text
     assert "compound LABEL is not evidence of a compound VALUE" in prompt.text

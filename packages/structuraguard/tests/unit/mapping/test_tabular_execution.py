@@ -11,6 +11,7 @@ from structuraguard.contracts.deterministic_mapping import MappingScope
 from structuraguard.contracts.tabular_import import (
     TabularCopyChoice,
     TabularImportChoice,
+    TabularImportOmission,
     TabularImportPlan,
     TabularImportSource,
     TabularImportSuggestion,
@@ -104,6 +105,127 @@ def test_wire_json_is_strict_and_accepts_numeric_confidence() -> None:
     wire = suggestion.model_dump_json().replace('"0.99"', "0.99")
     checked = TabularImportSuggestion.model_validate_json(wire)
     assert checked.confidence == Decimal("0.99")
+
+
+def omission_case() -> tuple[
+    TabularImportSource, DatabaseCatalog, MappingScope, TabularImportSuggestion
+]:
+    source, db, scope, suggestion = sample()
+    source = TabularImportSource(
+        labels=(*source.labels, "internal_context"),
+        rows=tuple({**row, "internal_context": "test-context"} for row in source.rows),
+    )
+    return (
+        source,
+        db,
+        scope,
+        suggestion.model_copy(
+            update={
+                "omissions": (
+                    TabularImportOmission(
+                        source_id="s2",
+                        reason="no_target_column",
+                        confidence=Decimal("0.97"),
+                    ),
+                )
+            }
+        ),
+    )
+
+
+def test_explicit_omission_is_bound_observable_and_keeps_original_preview() -> None:
+    source, db, scope, suggestion = omission_case()
+    plan = bind_tabular_import_plan(source, db, scope, suggestion)
+    result = execute_tabular_import(source.labels, source.rows, db, scope, plan)
+    assert plan.omissions == suggestion.omissions
+    assert all("internal_context" not in row for row in result.rows)
+    assert result.omissions[0].source_name == "internal_context"
+    assert result.omissions[0].operation == "omit"
+    assert result.omissions[0].reason == "no_target_column"
+    assert result.confidence == Decimal("0.97")
+    assert result.preview[0].omitted == {"internal_context": "test-context"}
+    assert result.preview[0].before == source.rows[0]
+    assert "test-context" not in repr(result)
+
+
+@pytest.mark.parametrize(
+    ("case", "code"),
+    [
+        ("missing", "TABULAR_IMPORT_SOURCE_COVERAGE"),
+        ("unknown", "TABULAR_IMPORT_SOURCE_UNKNOWN"),
+        ("duplicate", "TABULAR_IMPORT_OMISSION_CONFLICT"),
+        ("mapped", "TABULAR_IMPORT_OMISSION_CONFLICT"),
+        ("low_confidence", "TABULAR_IMPORT_CONFIDENCE_LOW"),
+    ],
+)
+def test_omissions_cannot_bypass_source_coverage(case: str, code: str) -> None:
+    source, db, scope, suggestion = omission_case()
+    data = suggestion.model_dump()
+    if case == "missing":
+        data["omissions"] = ()
+    elif case == "duplicate":
+        data["omissions"] = (*data["omissions"], *data["omissions"])
+    elif case == "low_confidence":
+        data["omissions"][0]["confidence"] = Decimal("0.84")
+    else:
+        data["omissions"][0]["source_id"] = "s0" if case == "mapped" else "s99"
+    with pytest.raises(TabularImportError, match=code) as error:
+        bind_tabular_import_plan(
+            source, db, scope, TabularImportSuggestion.model_validate(data)
+        )
+    assert "internal_context" not in str(error.value.details)
+    assert "test-context" not in str(error.value.details)
+
+
+def test_empty_omissions_preserve_legacy_plan_fingerprint() -> None:
+    from structuraguard.contracts._base import canonical_sha256_value
+
+    source, db, scope, suggestion = sample()
+    plan = bind_tabular_import_plan(source, db, scope, suggestion)
+    assert "omissions" not in plan.model_dump()
+    assert plan.fingerprint == canonical_sha256_value(
+        plan.model_dump(exclude={"fingerprint"})
+    )
+    assert TabularImportPlan.model_validate_json(plan.model_dump_json()) == plan
+
+
+def test_omission_cannot_leave_a_required_target_unmapped() -> None:
+    source, _, _, suggestion = omission_case()
+    db = catalog(
+        table(
+            "contacts",
+            column("postal_code").model_copy(update={"nullable": False}),
+            column("name"),
+            column("second_name"),
+        )
+    )
+    suggestion = suggestion.model_copy(
+        update={
+            "assignments": suggestion.assignments[1:],
+            "omissions": (
+                *suggestion.omissions,
+                TabularImportOmission(
+                    source_id="s0",
+                    reason="no_target_column",
+                    confidence=Decimal("0.99"),
+                ),
+            ),
+        }
+    )
+    with pytest.raises(
+        TabularImportError, match="TABULAR_IMPORT_REQUIRED_TARGET_MISSING"
+    ):
+        bind_tabular_import_plan(source, db, scope_for(db), suggestion)
+
+
+def test_saved_plan_rechecks_omission_confidence_independently() -> None:
+    source, db, scope, suggestion = omission_case()
+    plan = bind_tabular_import_plan(source, db, scope, suggestion)
+    data = plan.model_dump(exclude={"fingerprint"})
+    data["omissions"][0]["confidence"] = Decimal("0.4")
+    changed = TabularImportPlan.model_validate(data)
+    with pytest.raises(TabularImportError, match="TABULAR_IMPORT_CONFIDENCE_LOW"):
+        execute_tabular_import(source.labels, source.rows, db, scope, changed)
 
 
 @pytest.mark.parametrize("raw", ["Иванов Иван Иванович", "Иванов", " "])

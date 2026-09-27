@@ -15,6 +15,7 @@ from structuraguard.contracts.deterministic_mapping import MappingScope, Score
 from structuraguard.contracts.tabular_import import (
     TabularImportAssignment,
     TabularImportLineage,
+    TabularImportOmissionLineage,
     TabularImportPlan,
     TabularImportPreview,
     TabularImportResult,
@@ -183,6 +184,7 @@ def bind_tabular_import_plan(
         target_policy_fingerprint=catalog.target_policy_fingerprint,
         scope_fingerprint=scope.fingerprint,
         assignments=tuple(assignments),
+        omissions=suggestion.omissions,
         confidence=suggestion.confidence,
     )
     execute_tabular_import(
@@ -240,8 +242,27 @@ def _assignments(
             actual_confidence=plan.confidence,
             min_confidence=threshold,
         )
-    if set(grouped) != source_ids:
-        missing = min(source_ids - grouped.keys())
+    omitted: set[str] = set()
+    for omission in plan.omissions:
+        if omission.source_id not in source_ids:
+            raise _failure(
+                "TABULAR_IMPORT_SOURCE_UNKNOWN", source_id=omission.source_id
+            )
+        if omission.source_id in omitted or omission.source_id in grouped:
+            raise _failure(
+                "TABULAR_IMPORT_OMISSION_CONFLICT", source_id=omission.source_id
+            )
+        if omission.confidence < threshold:
+            raise _failure(
+                "TABULAR_IMPORT_CONFIDENCE_LOW",
+                source_id=omission.source_id,
+                actual_confidence=omission.confidence,
+                min_confidence=threshold,
+                actual={"operation": "omit"},
+            )
+        omitted.add(omission.source_id)
+    if set(grouped) | omitted != source_ids:
+        missing = min(source_ids - grouped.keys() - omitted)
         raise _failure("TABULAR_IMPORT_SOURCE_COVERAGE", source_id=missing)
     for column in table.columns:
         target = CatalogColumnRef(table_id=table.table_id, column_id=column.column_id)
@@ -429,10 +450,26 @@ def execute_tabular_import(
         table_id=table.table_id,
         rows=tuple(result),
         lineage=lineage,
-        confidence=min(plan.confidence, *(a.confidence for a in plan.assignments)),
+        omissions=tuple(
+            TabularImportOmissionLineage(
+                **item.model_dump(), source_name=names[item.source_id]
+            )
+            for item in plan.omissions
+        ),
+        confidence=min(
+            plan.confidence,
+            *(a.confidence for a in plan.assignments),
+            *(o.confidence for o in plan.omissions),
+        ),
         preview=tuple(
             TabularImportPreview(
-                row_index=i + 1, before=dict(before), after=dict(after)
+                row_index=i + 1,
+                before=dict(before),
+                after=dict(after),
+                omitted={
+                    names[o.source_id]: before[names[o.source_id]]
+                    for o in plan.omissions
+                },
             )
             for i, (before, after) in enumerate(
                 zip(source.rows[:3], result[:3], strict=True)

@@ -148,13 +148,28 @@ type TabularImportChoice = (
 )
 
 
+class TabularImportOmission(SensitiveMappingContract):
+    """Явное исключение исходного поля без подходящей колонки назначения."""
+
+    source_id: TabularSourceId
+    reason: Literal["no_target_column"]
+    confidence: TabularWireScore
+
+
 class TabularImportSuggestion(SensitiveMappingContract):
     """Простой JSON-ответ. Межполевые правила проверяет binder, не модель."""
 
     decision: Literal["map", "ambiguous", "unsupported"]
     assignments: Annotated[tuple[TabularImportChoice, ...], Field(max_length=128)]
+    omissions: Annotated[tuple[TabularImportOmission, ...], Field(max_length=128)] = ()
     confidence: TabularWireScore
     reason: TabularReason
+
+
+class TabularImportWireSuggestion(TabularImportSuggestion):
+    """Новый ответ модели обязан явно перечислять исключения, включая пустые."""
+
+    omissions: Annotated[tuple[TabularImportOmission, ...], Field(max_length=128)]
 
 
 class TabularImportAssignment(_TabularOperation):
@@ -175,6 +190,9 @@ class TabularImportPlan(SensitiveMappingContract):
     assignments: Annotated[
         tuple[TabularImportAssignment, ...], Field(min_length=1, max_length=128)
     ]
+    omissions: Annotated[tuple[TabularImportOmission, ...], Field(max_length=128)] = (
+        Field(default=(), exclude_if=lambda value: not value)
+    )
     confidence: Score
     fingerprint: FingerprintStr = _AUTO
 
@@ -210,6 +228,14 @@ class TabularImportPreview(SensitiveMappingContract):
     row_index: PositiveInt
     before: dict[StrictStr, TabularCell]
     after: dict[StrictStr, TabularCell]
+    omitted: dict[StrictStr, TabularCell] = Field(default_factory=dict)
+
+
+class TabularImportOmissionLineage(TabularImportOmission):
+    """Исключённое поле остаётся явно видимым рядом с lineage переноса."""
+
+    source_name: StrictStr
+    operation: Literal["omit"] = "omit"
 
 
 class TabularImportResult(SensitiveMappingContract):
@@ -218,5 +244,6 @@ class TabularImportResult(SensitiveMappingContract):
     table_id: StrictStr
     rows: tuple[dict[StrictStr, TabularCell], ...]
     lineage: tuple[TabularImportLineage, ...]
+    omissions: tuple[TabularImportOmissionLineage, ...] = ()
     preview: Annotated[tuple[TabularImportPreview, ...], Field(max_length=3)]
     confidence: Score = Decimal(1)
