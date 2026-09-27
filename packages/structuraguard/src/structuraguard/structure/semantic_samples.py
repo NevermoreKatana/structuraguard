@@ -29,7 +29,8 @@ from structuraguard.contracts.source import (
     PhysicalNodeKind,
     SourceLocation,
 )
-from structuraguard.exceptions import LLMProviderError
+from structuraguard.exceptions import LLMProviderError, ParseExecutionError
+from structuraguard.structure._log_json import JsonValue, decode_log_json
 from structuraguard.structure._stream import StreamCheck
 from structuraguard.structure.validation import (
     close_source,
@@ -271,6 +272,60 @@ def physical_values(
                 )
 
 
+def _log_json_paths(
+    text: str, policy: LLMStructurePolicy
+) -> tuple[tuple[str, ...], ...] | None:
+    """Подсказать только полный набор доступных scalar paths; не исправлять JSON."""
+    try:
+        decoded = decode_log_json(text, policy.execution)
+    except ParseExecutionError:
+        # Это optional catalog hint, а не выбор selector или проверка его плана.
+        return None
+    stack: list[tuple[JsonValue, tuple[str, ...]]] = [(decoded, ())]
+    paths: list[tuple[str, ...]] = []
+    while stack:
+        value, path = stack.pop()
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if len(path) >= 30 or not key or len(key) > 256:
+                    return None
+                stack.append((child, (*path, key)))
+        elif not isinstance(value, list):
+            paths.append(path)
+            if len(paths) > policy.max_fields:
+                return None
+    return tuple(sorted(paths)) or None
+
+
+def _log_json_shapes(
+    entries: dict[str, CatalogEntry],
+    samples: dict[PhysicalSourceRef, PhysicalSample],
+    policy: LLMStructurePolicy,
+) -> list[CanonicalValue]:
+    """Группировать paths проверенных samples, без значений и догадок о типах."""
+    groups: dict[tuple[tuple[str, ...], ...], list[CanonicalValue]] = {}
+    for alias, entry in entries.items():
+        sample = samples.get(entry.ref)
+        if (
+            entry.ref.kind is not PhysicalObjectKind.LINE
+            or sample is None
+            or not isinstance(sample.raw_value, StringScalar)
+        ):
+            continue
+        paths = _log_json_paths(sample.raw_value.value, policy)
+        if paths is not None:
+            groups.setdefault(paths, []).append(alias)
+    return [
+        {
+            "refs": refs,
+            "selector": "log_json",
+            "offset": 0,
+            "scalar_paths": [list(path) for path in paths],
+        }
+        for paths, refs in groups.items()
+    ]
+
+
 async def prepare_samples(
     request: StructureAnalysisRequest, replay: Replay, policy: LLMStructurePolicy
 ) -> SemanticSampleCatalog:
@@ -484,6 +539,9 @@ async def prepare_samples(
             "max_entities": policy.max_entities,
         },
     }
+    shapes = _log_json_shapes(entries, samples, policy)
+    if shapes:
+        payload["log_json_shapes"] = shapes
     if len(canonical_json_value(payload).encode()) > policy.max_payload_bytes:
         raise LLMProviderError(LLMErrorCode.CONTEXT_LIMIT)
     return SemanticSampleCatalog(

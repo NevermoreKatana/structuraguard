@@ -51,8 +51,9 @@ async def analyze_structure(
 
 Для HTTP adapter зарегистрировать `prompts=(semantic_prompt(),)` и
 `schemas=(semantic_response_schema(),)` из `structuraguard.structure`.
-Prompt версии `1.1.1` требует компактный JSON в одну строку без пропуска полей
-или source scope; strict response schema сохраняет версию `1.1.0`. Native JSON Schema
+Prompt версии `1.1.2` требует компактный JSON в одну строку без пропуска полей
+или source scope; strict response schema имеет версию `1.2.0` и ограничивает неприменимые поля
+по семейству плана (например, у LOG табличные границы и `root_ref` — `null`). Native JSON Schema
 используется при capability `json_schema=True`; JSON mode также требует локальной
 строгой проверки. Настройки HTTP lifecycle, token limits и routing описаны
 в [LLM API](llm.md). Default tests используют только fake provider/HTTP transport.
