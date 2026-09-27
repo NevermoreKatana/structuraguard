@@ -10,6 +10,7 @@ from structuraguard.contracts._base import (
     canonical_sha256_value,
 )
 from structuraguard.contracts.common import (
+    ParsePlanKind,
     PhysicalObjectKind,
     PhysicalSourceRef,
     RawScalar,
@@ -378,6 +379,25 @@ async def prepare_samples(
         raise
     finally:
         await close_source(iterator, primary)
+    # Только подтверждённые дубликаты log blocks/captures убираются из egress.
+    # Полный physical scope выше сохраняется для проверки omissions и lineage.
+    line_projection = (
+        PhysicalObjectKind.LINE in families
+        and families <= {PhysicalObjectKind.LINE, PhysicalObjectKind.BLOCK}
+        and not has_unwrapped_blocks
+        and any(ref.kind is PhysicalObjectKind.LINE for ref in samples)
+        and all(
+            candidate.plan_kind is ParsePlanKind.LOG
+            and all(ref.kind is PhysicalObjectKind.LINE for ref in candidate.evidence)
+            for candidate in ranked
+        )
+    )
+    if line_projection:
+        retained = {
+            ref: entry
+            for ref, entry in retained.items()
+            if ref.kind is PhysicalObjectKind.LINE
+        }
     ordered = [ref for ref in request.manifest.source_index.refs if ref in retained]
     aliases = {ref: f"r{index}" for index, ref in enumerate(ordered)}
     entries = {aliases[ref]: retained[ref] for ref in ordered}
@@ -415,9 +435,14 @@ async def prepare_samples(
             {
                 "ref": aliases[sample.source_ref],
                 "raw": sample.raw_value.model_dump(),
-                "sample_fingerprint": sample.fingerprint,
+                **(
+                    {}
+                    if line_projection
+                    else {"sample_fingerprint": sample.fingerprint}
+                ),
             }
             for sample in request.samples
+            if sample.source_ref in aliases
         ],
         "candidates": [
             {
@@ -447,6 +472,8 @@ async def prepare_samples(
                     },
                 }
                 for item in request.profile.observations[:32]
+                if not line_projection
+                or any(ref in aliases for ref in item.source_refs)
             ],
         },
         "parsing_policy": {

@@ -65,6 +65,7 @@ from structuraguard.structure.document_entities import DocumentEntityExtractor
 from structuraguard.structure.llm_analysis import LLMStructureAnalyzer
 from structuraguard.structure.semantic_samples import (
     Replay,
+    _blocks_represent_lines,
     open_replay,
 )
 from structuraguard.structure.validation import (
@@ -166,6 +167,9 @@ def _sample_values(
             StringScalar(value=line.text),
             line.location,
         )
+    # Дубликаты log blocks не должны вытеснять следующие LINE из head/tail sample.
+    if batch.parser_id == "builtin.log" and _blocks_represent_lines(batch):
+        return
     for block in batch.blocks:
         if block.text is not None:
             yield (
