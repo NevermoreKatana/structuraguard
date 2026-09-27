@@ -68,7 +68,7 @@ async def test_syslog_request_preserves_nineteen_events_in_native_context() -> N
                 semantic_name=name.lower(),
                 semantic_type="string",
                 locale_hint=None,
-                source_refs=scope,
+                source_refs=scope[:4],
                 selector=SemanticSelector(
                     kind="log_json",
                     index=None,
@@ -171,6 +171,11 @@ async def test_syslog_request_preserves_nineteen_events_in_native_context() -> N
         assert len(seen) == 1
         assert len(seen[0].content) + 1024 <= 24576 - 3072
         wire = json.loads(seen[0].content)
+        assert "compact SINGLE-LINE JSON" in wire["messages"][0]["content"]
+        assert "complete source scope" in wire["messages"][0]["content"]
+        assert "1-4 representative LINE aliases" in wire["messages"][0]["content"]
+        assert "parsing_policy.locales or null" in wire["messages"][0]["content"]
+        assert 'decision="plan" and a non-null plan' in wire["messages"][0]["content"]
         payload = json.loads(wire["messages"][-1]["content"])
         assert all(item["kind"] == "line" for item in payload["source_catalog"])
         assert len(payload["source_catalog"]) == len(payload["samples"]) == 19
