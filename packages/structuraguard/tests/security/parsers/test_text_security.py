@@ -12,6 +12,7 @@ from typing import NoReturn
 
 import pytest
 from tests.fakes.parsers import FakeSourceReader
+from tests.unit.parsers.builtin._log_fixtures import SYSLOG_JSON
 
 from structuraguard.contracts import ExtractedBatch, SourceArtifact
 from structuraguard.exceptions import ParserError, SecurityPolicyError
@@ -255,8 +256,9 @@ class _BlockingAfterPrefixReader(_BlockingReader):
             b"2026-09-02 10:45:01 INFO first\n2026-09-02 10:45:02 ERROR second\n",
             "sample.log",
         ),
+        (LogParser, SYSLOG_JSON, "syslog.csv"),
     ),
-    ids=("txt", "markdown", "log"),
+    ids=("txt", "markdown", "log", "syslog-json"),
 )
 async def test_probe_never_reads_beyond_max_probe_bytes(
     factory: Callable[[], Parser],

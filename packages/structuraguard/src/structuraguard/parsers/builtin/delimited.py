@@ -53,8 +53,10 @@ from ._common import (
     extraction_id,
     is_text_like,
     limit_error,
+    probe_lines,
     read_probe_sample,
 )
+from ._log_detection import has_syslog_envelopes
 
 _SCHEMA_VERSION: Final = "1.1.0"
 _SDK_VERSION: Final = "0.3.0"
@@ -1548,7 +1550,11 @@ class DelimitedTextParser:
             limits=self._limits,
         )
         detection: _DialectDetection | None = None
-        if is_text_like(text) and source.size_bytes > 0:
+        is_syslog = (
+            self._detection_options.dialect_override is None
+            and has_syslog_envelopes(probe_lines(text, max_lines=256))
+        )
+        if is_text_like(text) and source.size_bytes > 0 and not is_syslog:
             try:
                 detection = await _detect_dialect(
                     text,

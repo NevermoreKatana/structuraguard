@@ -42,6 +42,7 @@ from ._common import (
     probe_lines,
     read_probe_sample,
 )
+from ._log_detection import ISO_SYSLOG_EVENT
 
 _MEDIA_TYPES = frozenset({"text/x-log", "text/log", "application/x-log", "text/plain"})
 _EXTENSIONS = frozenset({".log"})
@@ -146,6 +147,25 @@ def _recognize(
             fail_on_overflow=enforce_capture_limit,
         )
         return _Recognition("iso", bounded, fixed_overflow or kv_overflow)
+
+    syslog = ISO_SYSLOG_EVENT.match(line)
+    if syslog is not None:
+        syslog_captures = tuple(
+            _Capture(hint, *syslog.span(group))
+            for group, hint in (
+                ("timestamp", "timestamp"),
+                ("host", "host"),
+                ("service", "service"),
+                ("pid", "process_id"),
+            )
+            if syslog.group(group) is not None
+        )
+        overflow = len(syslog_captures) > max_capture_groups
+        if overflow and enforce_capture_limit:
+            raise _capture_limit_error(max_capture_groups)
+        return _Recognition(
+            "iso_syslog", syslog_captures[:max_capture_groups], overflow
+        )
 
     apache = _APACHE_COMBINED.fullmatch(line)
     if apache is not None:

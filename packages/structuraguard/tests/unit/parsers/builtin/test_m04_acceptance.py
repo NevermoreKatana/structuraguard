@@ -11,6 +11,7 @@ from tests.unit.parsers.builtin._document_fixtures import (
     pdf_bytes,
     zip_bytes,
 )
+from tests.unit.parsers.builtin._log_fixtures import SYSLOG_CSV, SYSLOG_JSON
 from tests.unit.parsers.builtin._support import contexts_for, source_for
 
 from structuraguard.parsers import ParserRegistry
@@ -36,6 +37,8 @@ from structuraguard.parsers.builtin import (
             b"2026-09-02 10:45:01 INFO first\n2026-09-02 10:45:02 ERROR second\n",
             "builtin.log",
         ),
+        (SYSLOG_JSON, "builtin.log"),
+        (SYSLOG_CSV, "builtin.delimited"),
         (b"a,b\n1,2\n3,4\n", "builtin.delimited"),
         (b"a\tb\n1\t2\n3\t4\n", "builtin.delimited"),
         (b'{"a":[1,2]}', "builtin.json"),
@@ -64,6 +67,8 @@ from structuraguard.parsers.builtin import (
         "markdown-list",
         "markdown-fence",
         "log",
+        "syslog-json",
+        "csv-containing-syslog",
         "csv",
         "tsv",
         "json",

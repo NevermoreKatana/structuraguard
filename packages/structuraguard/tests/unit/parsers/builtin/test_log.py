@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from tests.contract_suites.parser import ParserContractCase, assert_parser_contract
+from tests.unit.parsers.builtin._log_fixtures import SYSLOG_JSON
 from tests.unit.parsers.builtin._support import (
     ShortReadSourceReader,
     collect,
@@ -23,6 +24,66 @@ _FIRST_EVENT = (
     "    Traceback: bounded continuation\n"
 )
 _SECOND_EVENT = "2026-09-02 10:45:02 INFO request complete\n"
+
+
+@pytest.mark.anyio
+async def test_iso_level_before_component_is_not_reclassified_as_syslog_host() -> None:
+    content = b"2026-01-01T10:00:01Z ERROR worker: failed\n" * 2
+    source = source_for(content, display_name="service.log")
+    _, context = contexts_for(source, content)
+    blocks = tuple(
+        block
+        for batch in await collect(LogParser(), source, context)
+        for block in batch.blocks
+    )
+    assert all(metadata_map(block.metadata)["recognizer"] == "iso" for block in blocks)
+    assert blocks[0].values[1].technical_type_hint == "log_level"
+    assert blocks[0].values[1].raw_value == StringScalar(value="ERROR")
+
+
+@pytest.mark.anyio
+async def test_syslog_json_preserves_event_text_and_envelope_spans() -> None:
+    source = source_for(SYSLOG_JSON, display_name="events.csv")
+    probe_context, parse_context = contexts_for(source, SYSLOG_JSON, batch_size=1)
+    batches = await assert_parser_contract(
+        ParserContractCase(
+            parser=LogParser(),
+            source=source,
+            probe_context=probe_context,
+            parse_context=parse_context,
+        )
+    )
+    blocks = tuple(block for batch in batches for block in batch.blocks)
+    assert tuple(block.text for block in blocks) == tuple(
+        SYSLOG_JSON.decode().splitlines(keepends=True)
+    )
+    assert all(
+        metadata_map(block.metadata)["recognizer"] == "iso_syslog" for block in blocks
+    )
+    assert tuple(line_span(block.location) for block in blocks) == ((1, 1), (2, 2))
+    assert sum(batch.record_count or 0 for batch in batches) == 2
+    first = blocks[0]
+    assert tuple(value.technical_type_hint for value in first.values) == (
+        "timestamp",
+        "host",
+        "service",
+        "process_id",
+    )
+    assert tuple(value.raw_value for value in first.values) == (
+        StringScalar(value="2026-01-01T10:00:01.123+03:00"),
+        StringScalar(value="node-a"),
+        StringScalar(value="sample-worker"),
+        StringScalar(value="101"),
+    )
+    for block in blocks:
+        assert block.text is not None
+        for value in block.values:
+            assert isinstance(value.location, LineRangeLocation)
+            assert isinstance(value.raw_value, StringScalar)
+            assert (
+                block.text[value.location.column_start : value.location.column_end]
+                == value.raw_value.value
+            )
 
 
 @pytest.mark.anyio
@@ -99,6 +160,8 @@ async def test_log_contract_preserves_events_captures_and_exact_spans() -> None:
         (b"2026-09-02 10:45:01 INFO only one line\n", "single.log"),
         (b"arbitrary first row\narbitrary second row\n", "unknown.log"),
         (b'{"level":"INFO"}\n{"level":"ERROR"}\n', "events.log"),
+        (SYSLOG_JSON.splitlines(keepends=True)[0], "single-syslog.log"),
+        (b"```log\n" + SYSLOG_JSON + b"```\n", "syslog-example.md"),
     ),
 )
 async def test_log_probe_declines_empty_ambiguous_and_json_lines(
@@ -151,8 +214,9 @@ async def test_log_probe_applies_capture_limit_only_after_known_kv_structure() -
             b'127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET / HTTP/1.0" 200 1\n',
             4,
         ),
+        (SYSLOG_JSON.splitlines(keepends=True)[0], 3),
     ),
-    ids=("iso", "apache-combined"),
+    ids=("iso", "apache-combined", "iso-syslog"),
 )
 async def test_log_probe_defers_fixed_capture_limit_until_structure_repeats(
     line: bytes,

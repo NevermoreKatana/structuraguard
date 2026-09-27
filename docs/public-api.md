@@ -882,7 +882,13 @@ zero-output shift sequences сделали бы terminal batching зависим
 `PlainTextParser` возвращает ordered physical lines. `MarkdownParser` добавляет
 heading, paragraph, list, blank и inert fenced-code blocks. `LogParser`
 сохраняет lines и event blocks; только фиксированные ISO timestamp/level,
-Apache combined и bounded key-value recognizers создают raw technical hints.
+ISO syslog (`timestamp host service[pid]: message`), Apache combined и bounded
+key-value recognizers создают raw technical hints. В syslog `pid` необязателен;
+timestamp, host, service и pid сохраняют точные исходные spans, а сообщение,
+включая JSON, остаётся непрозрачным текстом. Повторяющийся syslog envelope на всех
+непустых строках принадлежит LOG: внутренние запятые/двоеточия сообщения не
+подтверждают CSV/YAML. Явный `DelimitedDetectionOptions.dialect_override`
+сохраняет управление caller над CSV probe.
 Одна похожая или неизвестная строка не подтверждает LOG, а JSON-per-line не
 перехватывается у JSONL adapter. Ни один adapter не выполняет code,
 HTML, links или embedded commands и не формирует `ParsePlan`.

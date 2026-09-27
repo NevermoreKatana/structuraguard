@@ -23,6 +23,8 @@ from structuraguard.contracts.source import (
 )
 from structuraguard.ports.source import ParseContext, ProbeContext
 
+from ._common import probe_lines
+from ._log_detection import has_syslog_envelopes
 from ._markup import (
     Budget,
     MarkupDocument,
@@ -452,6 +454,7 @@ class YamlParser:
         # CSV cell не даёт YAML права отклонять весь источник во время selection.
         candidate = (
             bool(head)
+            and not has_syslog_envelopes(probe_lines(text, max_lines=256))
             and not head.startswith(("<", '"'))
             and (
                 head.startswith(
