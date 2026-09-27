@@ -34,6 +34,7 @@ from structuraguard.contracts.parsing import (
     DocumentBlockGrouping,
     DocumentParsePlan,
     DocumentTargetSelector,
+    LogJsonSelector,
     LogLineGrouping,
     LogParsePlan,
     LogTokenSelector,
@@ -55,7 +56,16 @@ from structuraguard.contracts.source import (
     ExtractedTreeNode,
     PhysicalNodeKind,
 )
-from structuraguard.exceptions import SecurityPolicyError, StructuralProfilingError
+from structuraguard.exceptions import (
+    ParseExecutionError,
+    SecurityPolicyError,
+    StructuralProfilingError,
+)
+from structuraguard.structure._log_json import (
+    JsonValue,
+    decode_log_json,
+    select_log_json,
+)
 from structuraguard.structure._plan_check import failure, record_steps
 from structuraguard.structure._stream import StreamCheck
 from structuraguard.structure.text_sources import text_sources
@@ -485,6 +495,7 @@ class PlanRuntime:
         budget.entity()
         values: list[SelectedValue] = []
         group_refs = {ref for _, ref, _ in group}
+        json_payloads: dict[int, dict[str, JsonValue]] = {}
         for field in self.plan.fields:
             if field.field_id not in entity.field_ids:
                 continue
@@ -513,7 +524,7 @@ class PlanRuntime:
                 continue
             offset = (
                 selector.line_offset
-                if isinstance(selector, LogTokenSelector)
+                if isinstance(selector, LogTokenSelector | LogJsonSelector)
                 else selector.block_offset
                 if isinstance(selector, DocumentTargetSelector)
                 else None
@@ -552,6 +563,32 @@ class PlanRuntime:
                     ),
                 )
             origin = origins[0]
+            if isinstance(selector, LogJsonSelector):
+                try:
+                    if field.semantic_type == "money":
+                        raise failure("money_conversion_policy_required")
+                    if offset not in json_payloads:
+                        json_payloads[offset] = decode_log_json(text, self.options)
+                    selected_json = select_log_json(
+                        json_payloads[offset], selector.path
+                    )
+                except ParseExecutionError as error:
+                    raise ParseExecutionError(
+                        error.issue.model_copy(
+                            update={"source_ref": ref, "field_id": field.field_id}
+                        )
+                    ) from None
+                budget.append(
+                    values,
+                    SelectedValue(
+                        field,
+                        raw,
+                        selected_json,
+                        origins,
+                        SelectionOperation.SELECT_JSON,
+                    ),
+                )
+                continue
             if isinstance(selector, LogTokenSelector):
                 parts = tokens(text, selector.delimiter, self.options.max_record_items)
                 if selector.token_index >= len(parts):

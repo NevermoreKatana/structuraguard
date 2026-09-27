@@ -89,7 +89,7 @@ class SemanticPathStep(FrozenContract):
 class SemanticSelector(FrozenContract):
     """Закрытые selections; неприменимые поля обязаны оставаться null/empty."""
 
-    kind: Literal["column", "tree", "log_piece", "log_record", "document"]
+    kind: Literal["column", "tree", "log_piece", "log_json", "log_record", "document"]
     index: NonNegativeInt | None
     offset: NonNegativeInt | None
     path: Annotated[tuple[SemanticPathStep, ...], Field(max_length=30)]

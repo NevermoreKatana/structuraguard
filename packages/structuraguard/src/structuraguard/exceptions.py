@@ -303,6 +303,8 @@ class LLMProviderError(StructuraGuardError):
         code: Нормализованный код отказа.
         call: Optional безопасная запись попытки; может отсутствовать и после вызова,
             если граница router/analyzer/run отбросила недоверенный attached record.
+        execution_issue: Диагностика локальной проверки плана SDK. Граница внешнего
+            provider отбрасывает её; analyzer может передать её в HybridAnalysis.
 
     Повтор допустим только для transient timeout/rate-limit/unavailable;
     решение о retry принимает caller с собственным общим budget.
@@ -311,9 +313,20 @@ class LLMProviderError(StructuraGuardError):
     """
 
     def __init__(
-        self, code: LLMErrorCode, *, call: LLMCallRecord | None = None
+        self,
+        code: LLMErrorCode,
+        *,
+        call: LLMCallRecord | None = None,
+        execution_issue: ParseExecutionIssue | None = None,
     ) -> None:
+        from structuraguard.contracts.execution import ParseExecutionIssue
+
         self.call = call
+        self.execution_issue = (
+            ParseExecutionIssue.model_validate(execution_issue.model_dump())
+            if execution_issue is not None
+            else None
+        )
         super().__init__(
             error_code=code.value,
             message="LLM provider не завершил запрос",

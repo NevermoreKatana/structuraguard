@@ -51,7 +51,7 @@ async def analyze_structure(
 
 Для HTTP adapter зарегистрировать `prompts=(semantic_prompt(),)` и
 `schemas=(semantic_response_schema(),)` из `structuraguard.structure`.
-Prompt и strict response schema имеют версию `1.0.0`. Native JSON Schema
+Prompt и strict response schema имеют версию `1.1.0`. Native JSON Schema
 используется при capability `json_schema=True`; JSON mode также требует локальной
 строгой проверки. Настройки HTTP lifecycle, token limits и routing описаны
 в [LLM API](llm.md). Default tests используют только fake provider/HTTP transport.
@@ -62,7 +62,7 @@ Prompt и strict response schema имеют версию `1.0.0`. Native JSON Sc
 | --- | --- |
 | Таблица | Zero-based header/data/footer regions, repeated headers, конечный data end, column selectors, одна row entity |
 | Дерево | Реальный root, literal KEY/name/occurrence и ITEM steps, nested parent/child groups, paths к values или names |
-| Логи | Полный конечный ordered scope строк, disjoint explicit records, несколько event variants, bounded multiline records; selections целой записи или части строки по delimiter/index/offset |
+| Логи | Полный конечный ordered scope строк, disjoint explicit records, несколько event variants, bounded multiline records; selections целой записи, token по delimiter/index/offset или scalar JSON сообщения syslog по literal keys |
 | Документ | Полный конечный ordered scope blocks, sections как explicit groups, несколько entity groups; block text либо key/value target с проверкой literal key |
 
 `SemanticPlanProposal` — закрытое описание разрешённого подмножества ParsePlan,
@@ -71,6 +71,31 @@ regex или callbacks. Неиспользуемые поля обязатель
 массив; лишние поля запрещены. В wire используется `log_piece`, который compiler
 преобразует в существующий `LogTokenSelector` внутри SDK. Это сохраняет запрет
 credential-bearing ключей generic LLM DTO.
+
+Для JSON внутри `timestamp host service[pid]: {...}` модель выбирает `log_json`:
+`offset=0`, `path=[{"operation":"key","name":"requestID","occurrence":0}]`;
+остальные поля selector равны `null`. Compiler создаёт `LogJsonSelector` с
+`line_offset` и путём максимум из 30 literal keys (каждый до 256 символов).
+Вложенные object keys поддерживаются; arrays, wildcard, JSONPath и expressions
+не входят в grammar. Путь выбирает LLM, SDK не угадывает значения или названия.
+`log_piece` не подходит для JSON: delimiter split повреждает escaped строки,
+запятые и пробелы. `log_json` проверяет syslog envelope и строго декодирует
+один JSON object, без duplicate keys, non-finite constants и trailing данных.
+Числовые lexemes сохраняются строками без coercion; JSON boolean/null сохраняют
+свой тип. UUID/даты остаются чистыми строками для дальнейшей типизации.
+Отсутствующий key и object/array вместо scalar отклоняют план, а не заменяются null.
+
+Размер сообщения ограничен `max_record_bytes`, количество элементов —
+`max_record_items`, вложенность — 64. На record каждый выбранный payload
+декодируется один раз. `normalized_value` содержит выбранный scalar;
+`raw_value` и LINE origin сохраняют исходную строку, операция — `select_json`.
+Rejected validation может содержать `execution_issue` с безопасными reason,
+field ID и наблюдаемой LINE reference для диагностики. Эта reference не означает
+accepted provenance: rejected `issues.source_refs` по-прежнему пусты, execution
+по отклонённому плану запрещено.
+При отклонении предложения LLM та же диагностика сохраняется в
+`HybridAnalysis.execution_issue` вместе с `LLM_SCHEMA_VIOLATION`; ошибки внешнего
+provider не могут добавить такую диагностику через свою exception boundary.
 
 Модель предлагает ASCII snake_case field/entity identifiers, semantic names,
 тип из enum и locale из policy. SDK сохраняет raw values; hints не запускают

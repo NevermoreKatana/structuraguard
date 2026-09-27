@@ -176,7 +176,7 @@ async def main():
     provider = FakeLLMProvider((ScriptedResponse(output_json=encoded(output)),), clock=fixed_clock)
     result = await analyze_structure(request, partial(stream, batches), provider, Scanner(), context())
     assert isinstance(result, StructurePlanCreated)
-    assert result.plan.semantic_analysis.prompt.version == "1.0.0"
+    assert result.plan.semantic_analysis.prompt.version == "1.1.0"
     assert provider.call_count == 1
     print(result.kind)
 

@@ -40,6 +40,7 @@ from structuraguard.contracts.document_semantics import (
     DocumentSpanGrouping,
     DocumentSpanSelector,
 )
+from structuraguard.contracts.execution import ParseExecutionIssue
 from structuraguard.contracts.llm import LLMPlanProvenance
 from structuraguard.contracts.semantic import SemanticConfidence
 from structuraguard.contracts.source import ExtractedDatasetManifest, SourceLocation
@@ -426,6 +427,17 @@ class LogTokenSelector(FrozenContract):
     ] = "whitespace"
 
 
+class LogJsonSelector(FrozenContract):
+    """Scalar JSON object по literal keys после проверенного syslog envelope."""
+
+    kind: Literal["log_json"] = "log_json"
+    line_offset: NonNegativeInt = 0
+    path: Annotated[
+        tuple[Annotated[StrictStr, Field(min_length=1, max_length=256)], ...],
+        Field(min_length=1, max_length=30),
+    ]
+
+
 class DocumentTargetSelector(FrozenContract):
     """Выбирает закрытый тип extraction target блока либо таблицы документа."""
 
@@ -454,6 +466,7 @@ ParseFieldSelector = Annotated[
     TabularColumnSelector
     | TreePathSelector
     | LogTokenSelector
+    | LogJsonSelector
     | LogRecordSelector
     | DocumentTargetSelector
     | DocumentSpanSelector,
@@ -640,7 +653,7 @@ class _ParsePlanBase(FrozenContract):
             or self.semantic_analysis is not None
             or any(f.locale_hint is not None for f in self.fields)
             or any(
-                isinstance(f.selector, LogRecordSelector)
+                isinstance(f.selector, LogRecordSelector | LogJsonSelector)
                 or (isinstance(f.selector, TreePathSelector) and f.selector.steps)
                 for f in self.fields
             )
@@ -891,7 +904,9 @@ class LogParsePlan(_ParsePlanBase):
         ):
             raise ValueError("line_refs относятся к другому extraction")
         if any(
-            not isinstance(field.selector, LogTokenSelector | LogRecordSelector)
+            not isinstance(
+                field.selector, LogTokenSelector | LogJsonSelector | LogRecordSelector
+            )
             for field in self.fields
         ):
             raise ValueError("log plan требует safe token selectors")
@@ -932,7 +947,7 @@ class LogParsePlan(_ParsePlanBase):
             for field_id in entity.field_ids:
                 selector = fields_by_id[field_id].selector
                 if (
-                    isinstance(selector, LogTokenSelector)
+                    isinstance(selector, LogTokenSelector | LogJsonSelector)
                     and selector.line_offset >= grouping_limit
                 ):
                     raise ValueError(
@@ -1085,7 +1100,7 @@ def _validate_explicit_records(
                     selector.block_offset
                     if isinstance(selector, DocumentTargetSelector)
                     else selector.line_offset
-                    if isinstance(selector, LogTokenSelector)
+                    if isinstance(selector, LogTokenSelector | LogJsonSelector)
                     else None
                 )
                 if offset is not None and offset >= len(record):
@@ -1451,6 +1466,9 @@ class ParsePlanValidationResult(FrozenContract):
     profile_fingerprint: FingerprintStr
     plan_fingerprint: FingerprintStr
     decision: ValidationDecision
+    execution_issue: ParseExecutionIssue | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     issues: tuple[ValidationIssue, ...] = ()
     validated_plan: ValidatedParsePlan | None = None
 
@@ -1461,6 +1479,8 @@ class ParsePlanValidationResult(FrozenContract):
             for issue in self.issues
         )
         if self.decision is ValidationDecision.ACCEPTED:
+            if self.execution_issue is not None:
+                raise ValueError("accepted result не может содержать execution failure")
             if self.validated_plan is None or has_errors:
                 raise ValueError("accepted result требует validated plan без ошибок")
             evidence = self.validated_plan
@@ -1488,6 +1508,12 @@ class ParsePlanValidationResult(FrozenContract):
             ):
                 raise ValueError("validation result не совпадает с accepted evidence")
         else:
+            if self.execution_issue is not None and not any(
+                issue.code == self.execution_issue.code
+                and issue.message_key == self.execution_issue.reason.upper()
+                for issue in self.issues
+            ):
+                raise ValueError("execution issue не согласована с validation issues")
             if self.validated_plan is not None:
                 raise ValueError(
                     "только accepted result может содержать validated plan"

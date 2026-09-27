@@ -349,5 +349,6 @@ class ParsePlanValidator:
                 if accepted
                 else ValidationDecision.REJECTED,
                 "validated_plan": accepted,
+                "execution_issue": error.issue if error else None,
             }
         )

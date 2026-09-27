@@ -44,6 +44,7 @@ class SelectionOperation(StrEnum):
     COPY = "copy"
     JOIN_LINES = "join_lines"
     SELECT_TOKEN = "select_token"
+    SELECT_JSON = "select_json"
     SELECT_KEY = "select_key"
     SELECT_VALUE = "select_value"
     NODE_NAME = "node_name"
@@ -95,3 +96,9 @@ class ParseExecutionIssue(FrozenContract):
     stage: ExecutionStage
     batch_index: NonNegativeInt | None = None
     emitted_batches: NonNegativeInt = 0
+    source_ref: PhysicalSourceRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    field_id: IdentifierStr | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )

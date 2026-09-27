@@ -14,6 +14,7 @@ from structuraguard.contracts.llm import LLMErrorCode, LLMPlanProvenance
 from structuraguard.contracts.parsing import (
     DocumentParsePlan,
     DocumentTargetSelector,
+    LogJsonSelector,
     LogParsePlan,
     LogTokenSelector,
     ParseEntity,
@@ -57,13 +58,14 @@ def _selector(value: SemanticSelector) -> ParseFieldSelector:
         "column": {"index"},
         "tree": {"value_source"},
         "log_piece": {"index", "offset", "delimiter"},
+        "log_json": {"offset"},
         "log_record": set(),
         "document": {"offset", "target"},
     }
     expected = required[value.kind]
     if value.kind == "document" and value.target == "value":
         expected = {*expected, "key_equals"}
-    if active != expected or (value.path and value.kind != "tree"):
+    if active != expected or (value.path and value.kind not in {"tree", "log_json"}):
         raise LLMProviderError(LLMErrorCode.SCHEMA_VIOLATION)
     if value.kind == "column":
         assert value.index is not None
@@ -81,6 +83,15 @@ def _selector(value: SemanticSelector) -> ParseFieldSelector:
         )
         return LogTokenSelector(
             token_index=value.index, line_offset=value.offset, delimiter=value.delimiter
+        )
+    if value.kind == "log_json":
+        if not value.path or any(
+            step.operation != "key" or step.occurrence for step in value.path
+        ):
+            raise LLMProviderError(LLMErrorCode.SCHEMA_VIOLATION)
+        assert value.offset is not None
+        return LogJsonSelector(
+            line_offset=value.offset, path=tuple(step.name for step in value.path)
         )
     if value.kind == "log_record":
         return LogRecordSelector()

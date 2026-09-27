@@ -74,7 +74,7 @@ async def test_valid_plan_requires_physical_validation_and_keeps_provenance(
         result.plan.semantic_analysis.generation_fingerprint
         == provider.calls[0].generation_fingerprint
     )
-    assert result.plan.semantic_analysis.prompt.version == "1.0.0"
+    assert result.plan.semantic_analysis.prompt.version == "1.1.0"
     assert "UNTRUSTED_SOURCE_DATA" in scanner.requests[0].payload_json
     assert (
         len(scanner.requests[0].payload_json.encode())

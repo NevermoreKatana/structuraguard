@@ -24,6 +24,7 @@ from structuraguard.contracts.document_semantics import (
     DocumentSpanGrouping,
     DocumentSpanSelector,
 )
+from structuraguard.contracts.execution import ParseExecutionIssue
 from structuraguard.contracts.llm import LLMCallRecord, LLMErrorCode
 from structuraguard.contracts.parsing import (
     ParsePlan,
@@ -120,6 +121,7 @@ class HybridAnalysis:
     unresolved_refs: tuple[PhysicalSourceRef, ...] = ()
     unresolved_blocks: int = 0
     provider_metadata: tuple[LLMCallRecord, ...] = ()
+    execution_issue: ParseExecutionIssue | None = None
 
 
 def _sample_values(
@@ -566,6 +568,7 @@ class HybridStructureAnalyzer:
             self.provider, self.policy.budget, clock=self.clock, monotonic=self.timer
         )
         issues: tuple[ValidationIssue, ...] = ()
+        execution_issue: ParseExecutionIssue | None = None
         try:
             if (
                 capture.document
@@ -652,6 +655,7 @@ class HybridStructureAnalyzer:
             issues = proposed.issues
         except LLMProviderError as error:
             issues = (semantic_issue(error.error_code),)
+            execution_issue = error.execution_issue
         finally:
             if self.last_analysis is not None:
                 self.last_analysis = replace(
@@ -677,6 +681,7 @@ class HybridStructureAnalyzer:
                 assess(base.confidence, Decimal(1), Decimal(1), Decimal("0.2")),
                 issues,
                 calls=run.calls,
+                execution_issue=execution_issue,
             )
         assert self.last_analysis is not None
         return replace(
@@ -686,6 +691,7 @@ class HybridStructureAnalyzer:
                 semantic_issue("SEMANTIC_UNRESOLVED_SOURCE", unresolved[:64]),
             )[: self.policy.max_issues],
             provider_metadata=run.calls,
+            execution_issue=execution_issue,
         )
 
     @staticmethod
@@ -735,6 +741,7 @@ class HybridStructureAnalyzer:
         unresolved: tuple[PhysicalSourceRef, ...] = (),
         unresolved_blocks: int = 0,
         calls: tuple[LLMCallRecord, ...] = (),
+        execution_issue: ParseExecutionIssue | None = None,
     ) -> HybridAnalysis:
         if any(issue.code == LLMErrorCode.UNSAFE_CONTENT for issue in issues):
             plan = None
@@ -765,6 +772,7 @@ class HybridStructureAnalyzer:
                 open_replay(replay),
             )
             if validation.decision is not ValidationDecision.ACCEPTED:
+                execution_issue = validation.execution_issue
                 plan = None
                 issues = (*issues, *validation.issues)
                 score = assess()
@@ -782,4 +790,5 @@ class HybridStructureAnalyzer:
             unresolved,
             unresolved_blocks,
             calls,
+            execution_issue,
         )
