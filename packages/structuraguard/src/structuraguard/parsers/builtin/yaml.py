@@ -18,6 +18,7 @@ from structuraguard.contracts.source import (
     PhysicalMetadataEntry,
     PhysicalNodeKind,
     ProbeResult,
+    ProbeSignalKind,
     SourceArtifact,
 )
 from structuraguard.ports.source import ParseContext, ProbeContext
@@ -461,6 +462,7 @@ class YamlParser:
             )
         )
         supported = False
+        signal_kind = ProbeSignalKind.INTERNAL_STRUCTURE
         if (len(sample) < source.size_bytes and head.startswith(("{", "["))) or (
             len(sample) == source.size_bytes and _is_json_family(text)
         ):
@@ -500,6 +502,18 @@ class YamlParser:
                 allow_incomplete=len(sample) < source.size_bytes,
             )
             supported = bool(unit.trees)
+            # Непомеченный плоский список строк также является Markdown.
+            # Он допустим для YAML adapter, но не сильнее Markdown list markers.
+            if (
+                head.startswith("- ")
+                and all(
+                    line.startswith("- ") for line in text.splitlines() if line.strip()
+                )
+                and not any(
+                    node.node_kind is PhysicalNodeKind.MAPPING for node in unit.trees
+                )
+            ):
+                signal_kind = ProbeSignalKind.CONTENT_MEDIA_TYPE
         return probe_result(
             source,
             adapter_id=self.adapter_id,
@@ -510,6 +524,7 @@ class YamlParser:
             ),
             extensions=frozenset({".yaml", ".yml"}),
             encoding="utf-8",
+            signal_kind=signal_kind,
             warnings=(
                 "YAML_SCALARS_NOT_COERCED",
                 "YAML_ALIASES_NOT_EXPANDED",

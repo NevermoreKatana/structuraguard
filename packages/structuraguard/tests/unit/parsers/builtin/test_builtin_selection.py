@@ -73,7 +73,7 @@ def test_builtin_json_parsers_returns_two_independent_adapters() -> None:
             "claimed.txt",
             "text/plain",
             "builtin.markdown",
-            "md",
+            "markdown",
         ),
         (
             b"2026-09-02 10:45:01 INFO first\n2026-09-02 10:45:02 ERROR second\n",
@@ -94,7 +94,7 @@ def test_builtin_json_parsers_returns_two_independent_adapters() -> None:
             "notes.md",
             "text/markdown",
             "builtin.markdown",
-            "md",
+            "markdown",
         ),
         (
             _UNKNOWN_KV_LINE * 2,
@@ -118,7 +118,7 @@ def test_builtin_json_parsers_returns_two_independent_adapters() -> None:
             "embedded-log.md",
             "text/markdown",
             "builtin.markdown",
-            "md",
+            "markdown",
         ),
         (
             b"~~~text\n"
@@ -130,14 +130,14 @@ def test_builtin_json_parsers_returns_two_independent_adapters() -> None:
             "embedded-access-log.md",
             "text/markdown",
             "builtin.markdown",
-            "md",
+            "markdown",
         ),
         (
             b"```\nlevel=INFO user=alice\nlevel=ERROR user=bob\n```\n",
             "embedded-kv.md",
             "text/markdown",
             "builtin.markdown",
-            "md",
+            "markdown",
         ),
         (
             b"2026-09-02 10:45:01 INFO see [docs](https://example.invalid/1)\n"
@@ -153,7 +153,7 @@ def test_builtin_json_parsers_returns_two_independent_adapters() -> None:
             "links.md",
             "text/markdown",
             "builtin.markdown",
-            "md",
+            "markdown",
         ),
         (
             b"Read [one](https://example.invalid/1) here.\n"

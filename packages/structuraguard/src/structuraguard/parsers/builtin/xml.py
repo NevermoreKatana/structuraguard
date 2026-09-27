@@ -34,6 +34,7 @@ from ._markup import (
     probe_result,
     rejected,
 )
+from ._markup_detection import HTML_ROOT_TAGS
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -416,6 +417,14 @@ class XmlParser:
                 if len(sample) == source.size_bytes:
                     parser.close()
                 supported = document.root is not None
+                if (
+                    document.root is not None
+                    and document.root.raw_name in HTML_ROOT_TAGS
+                    and head.startswith(b"<")
+                    and not head.startswith(b"<?xml")
+                    and target.namespace_count == 0
+                ):
+                    supported = False
             except DefusedXmlException:
                 raise rejected("xml_dtd_or_entity") from None
             except (ParseError, LookupError):

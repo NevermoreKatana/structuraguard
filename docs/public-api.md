@@ -857,6 +857,11 @@ registry.register_many(builtin_text_parsers())
 
 Factory каждый раз возвращает новые `PlainTextParser`, `LogParser` и
 `MarkdownParser` с IDs `builtin.text`, `builtin.log` и `builtin.markdown`.
+Канонический `ProbeResult.format_id` для Markdown — `markdown`, как и значение
+в `SecurityPolicy.allowed_formats`; `.md` остаётся расширением файла.
+Начиная с версии adapter `1.0.1`, исправлено прежнее ошибочное значение `md`,
+из-за которого разрешённый Markdown отклонялся security policy. Потребителям
+результата probe, сравнивавшим его с `md`, нужно использовать `markdown`.
 Пределы задаются immutable `TextParserLimits`, `LogParserLimits` и
 `MarkdownParserLimits`; размер batch — через `ParseContext.batch_options`.
 Hard caps: `batch_size <= 1_000_000`, `max_batches <= 10_000` и
@@ -881,6 +886,12 @@ Apache combined и bounded key-value recognizers создают raw technical hi
 Одна похожая или неизвестная строка не подтверждает LOG, а JSON-per-line не
 перехватывается у JSONL adapter. Ни один adapter не выполняет code,
 HTML, links или embedded commands и не формирует `ParsePlan`.
+При совместной регистрации встроенных adapters список объектов `- key: value`
+определяется как YAML, а обычный список `- item` — как Markdown. Fenced-code
+blocks остаются Markdown. HTML fragments с известным HTML корневым тегом
+(например, `<table>`) без XML declaration/namespace относятся к HTML;
+XML declaration и namespace сохраняют принадлежность XML. Решение принимается
+по содержимому; MIME и расширение не разрешают конфликт сильных сигналов.
 
 Все три parser используют line-based provenance. `line_start`/`line_end`
 нумеруются с единицы, capture columns — zero-based и end-exclusive, а исходный

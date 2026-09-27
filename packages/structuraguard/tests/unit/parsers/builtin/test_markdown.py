@@ -25,6 +25,8 @@ async def test_markdown_contract_preserves_ordered_blocks_and_exact_text() -> No
     content = _MARKDOWN.encode()
     source = source_for(content, display_name="readme.md", media_type="text/markdown")
     probe_context, parse_context = contexts_for(source, content, batch_size=1)
+    probe = await MarkdownParser().probe(source, probe_context)
+    assert probe.format_id == "markdown"
 
     batches = await assert_parser_contract(
         ParserContractCase(

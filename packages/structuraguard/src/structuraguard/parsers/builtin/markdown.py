@@ -41,6 +41,7 @@ _MEDIA_TYPES = frozenset({"text/markdown", "text/x-markdown"})
 _EXTENSIONS = frozenset({".md", ".markdown", ".mdown", ".mkd"})
 _HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+|$)")
 _LIST_ITEM = re.compile(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]+")
+_YAML_MAPPING_ITEM = re.compile(r"^ {0,3}-[ \t]+[^\r\n]+:(?:[ \t]|$)")
 _FENCE_START = re.compile(r"^ {0,3}(?P<marker>`{3,}|~{3,})(?:[^`~].*)?$")
 _MAX_PROBE_LINES = 256
 
@@ -66,7 +67,12 @@ def _has_markdown_structure(
 ) -> bool:
     headings = sum(_HEADING.match(line) is not None for line in lines)
     fences = sum(_fence_marker(line) is not None for line in lines)
-    list_items = sum(_LIST_ITEM.match(line) is not None for line in lines)
+    # Список объектов YAML имеет те же '-' markers; без собственных headings
+    # или fences он принадлежит grammar-aware YAML probe, а не Markdown.
+    list_items = sum(
+        _LIST_ITEM.match(line) is not None and _YAML_MAPPING_ITEM.match(line) is None
+        for line in lines
+    )
     inline_links = sum(
         1 for line in lines if "](" in line and "[" in line.partition("](")[0]
     )
@@ -116,7 +122,7 @@ class MarkdownParser:
     """
 
     adapter_id = "builtin.markdown"
-    version = "1.0.0"
+    version = "1.0.1"
     priority = 10
 
     def __init__(self, *, limits: MarkdownParserLimits | None = None) -> None:
@@ -178,7 +184,7 @@ class MarkdownParser:
             detected_media_type="text/markdown" if supported else None,
             detected_encoding=detection.reported_encoding,
             warnings=detection.warnings,
-            format_id="md" if supported else None,
+            format_id="markdown" if supported else None,
             signals=(structure, *advisory),
         )
 

@@ -36,6 +36,7 @@ from ._markup import (
     probe_result,
     utf8_chunks,
 )
+from ._markup_detection import HTML_ROOT_TAGS
 
 _VOID = frozenset(
     {
@@ -57,37 +58,6 @@ _VOID = frozenset(
 )
 _DENIED = frozenset(
     {"script", "style", "iframe", "object", "embed", "template", "svg", "math"}
-)
-_HTML_TAGS = frozenset(
-    {
-        "html",
-        "head",
-        "body",
-        "title",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "p",
-        "div",
-        "span",
-        "table",
-        "ul",
-        "ol",
-        "li",
-        "a",
-        "form",
-        "img",
-        "script",
-        "style",
-        "iframe",
-        "meta",
-        "link",
-        "section",
-        "article",
-    }
 )
 
 
@@ -147,6 +117,8 @@ class _Dom(HTMLParser):
         self.ready: list[MarkupUnit] = []
         self.recognized = False
         self.xhtml = False
+        self.root_seen = False
+        self.xml_root = False
         self._buffer_start = self.getpos()
 
     def feed(self, data: str) -> None:
@@ -263,7 +235,12 @@ class _Dom(HTMLParser):
             len(self.get_starttag_text() or ""),
             self.limits.max_token_chars,
         )
-        self.recognized |= tag in _HTML_TAGS
+        if not self.root_seen:
+            self.root_seen = True
+            self.xml_root = any(
+                name == "xmlns" or name.startswith("xmlns:") for name, _ in attrs
+            )
+        self.recognized |= tag in HTML_ROOT_TAGS
         self.xhtml |= (
             tag == "html" and ("xmlns", "http://www.w3.org/1999/xhtml") in attrs
         )
@@ -596,6 +573,7 @@ class HtmlParser:
             adapter_id=self.adapter_id,
             supported=parser.recognized
             and not parser.xhtml
+            and not parser.xml_root
             and not text.lstrip().startswith("<?xml"),
             format_id="html",
             media_types=frozenset({"text/html"}),

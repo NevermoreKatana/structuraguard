@@ -30,6 +30,8 @@ from structuraguard.parsers.builtin import (
     [
         (b"ordinary unstructured prose\n", "builtin.text"),
         (b"# Heading\n\nParagraph\n", "builtin.markdown"),
+        (b"- First item\n- Second item\n", "builtin.markdown"),
+        (b"```yaml\n- key: one\n- key: two\n```\n", "builtin.markdown"),
         (
             b"2026-09-02 10:45:01 INFO first\n2026-09-02 10:45:02 ERROR second\n",
             "builtin.log",
@@ -40,7 +42,18 @@ from structuraguard.parsers.builtin import (
         (b'{"a":1}\n{"a":2}\n', "builtin.json-lines"),
         (b"<root><child>raw</child></root>", "builtin.xml"),
         (b"<!DOCTYPE html><html><body><h1>raw</h1></body></html>", "builtin.html"),
+        (
+            b"<table><tr><th>name</th><th>postal</th></tr>"
+            b"<tr><td>Anna</td><td>00123</td></tr></table>",
+            "builtin.html",
+        ),
+        (b'<?xml version="1.0"?><table><row>01</row></table>', "builtin.xml"),
+        (b'<table xmlns="urn:records"><row>01</row></table>', "builtin.xml"),
         (b"---\nkey: value\nother: [one, two]\n", "builtin.yaml"),
+        (
+            b'- name: Anna\n  postal: "00123"\n- name: Ivan\n  postal: "420000"\n',
+            "builtin.yaml",
+        ),
         (zip_bytes(package_parts("xlsx")), "builtin.xlsx"),
         (zip_bytes(package_parts("docx")), "builtin.docx"),
         (pdf_bytes(), "builtin.pdf"),
@@ -48,6 +61,8 @@ from structuraguard.parsers.builtin import (
     ids=[
         "txt",
         "md",
+        "markdown-list",
+        "markdown-fence",
         "log",
         "csv",
         "tsv",
@@ -55,7 +70,11 @@ from structuraguard.parsers.builtin import (
         "ndjson",
         "xml",
         "html",
+        "html-fragment",
+        "xml-declaration",
+        "xml-namespace",
         "yaml",
+        "yaml-records",
         "xlsx",
         "docx",
         "pdf",
