@@ -164,6 +164,16 @@ async def build_plan(
     verify_mapped_parents(prepared, policy.read_policy.limits.max_evaluations)
     tables = {t.table_id: t for s in catalog.schemas for t in s.tables}
     identities = {i.table_id: i.column_ids for i in evidence.identities}
+    # M11 подтверждает отсутствующий PK identity только для INSERT. Его значение
+    # не требуется для lookup/RETURNING counts и не вычисляется при dry-run.
+    generated_identities = {
+        CatalogColumnRef(table_id=identity.table_id, column_id=cid)
+        for identity in evidence.identities
+        if mapping.operation is LoadOperation.INSERT_ONLY
+        and identity.kind == "database_generated"
+        for cid in identity.column_ids
+    }
+    known_server_values = server_values | generated_identities
     limits = policy.read_policy.limits
     constraint_policy = ConstraintValidationPolicy(
         target_id=catalog.target_id,
@@ -215,7 +225,7 @@ async def build_plan(
             c.column_id not in supplied
             and _needs_evaluation(c)
             and CatalogColumnRef(table_id=table.table_id, column_id=c.column_id)
-            not in server_values
+            not in known_server_values
             for c in table.columns
         ):
             codes[row.record_id].add("DRY_RUN_DEFAULT_UNVERIFIED")
