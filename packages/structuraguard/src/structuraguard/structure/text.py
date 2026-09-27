@@ -5,6 +5,7 @@ from typing import Literal
 
 from structuraguard.contracts.common import ParsePlanKind
 from structuraguard.contracts.structure import TextObservation
+from structuraguard.parsers.builtin._log_detection import ISO_SYSLOG_EVENT
 from structuraguard.structure._observations import Observations
 from structuraguard.structure._samples import Line, primitive
 
@@ -40,6 +41,17 @@ def key_values(text: str) -> tuple[str, ...]:
 
 
 def signatures(text: str) -> tuple[tuple[str, ...], tuple[str, ...], int, int]:
+    envelope = ISO_SYSLOG_EVENT.match(text)
+    if envelope is not None and envelope.group("host") not in _LEVELS:
+        # Граница syslog event задана envelope. Слова JSON/message не задают
+        # варианты raw_record и не требуют одинаковой длины сообщений.
+        envelope_shape = (
+            "timestamp",
+            "syslog_host",
+            "syslog_service",
+            "syslog_message",
+        )
+        return envelope_shape, envelope_shape, 1, 0
     template: list[str] = []
     shape: list[str] = []
     timestamps = levels = 0
@@ -103,10 +115,10 @@ def analyze_text(output: Observations) -> None:
     templates: dict[tuple[str, ...], list[Line]] = {}
     shapes: dict[tuple[str, ...], list[Line]] = {}
     for line in lines:
-        if len(line.text.split(maxsplit=64)) > 64:
+        template, shape, timestamp, level = signatures(line.text)
+        if "syslog_message" not in shape and len(line.text.split(maxsplit=64)) > 64:
             output.samples.reasons.add("token_limit")
             continue
-        template, shape, timestamp, level = signatures(line.text)
         for signature, groups in ((template, templates), (shape, shapes)):
             if signature not in groups and len(groups) >= output.options.max_patterns:
                 output.samples.reasons.add("pattern_limit")

@@ -8,7 +8,11 @@ from datetime import datetime
 from decimal import Context, Decimal, localcontext
 from time import monotonic
 
-from structuraguard.contracts.analysis import StructureAnalysisOptions
+from structuraguard.contracts.analysis import (
+    ExplicitRecordGrouping,
+    LogRecordSelector,
+    StructureAnalysisOptions,
+)
 from structuraguard.contracts.common import (
     IssueSeverity,
     ParsePlanKind,
@@ -27,6 +31,8 @@ from structuraguard.contracts.document_semantics import (
 from structuraguard.contracts.execution import ParseExecutionIssue
 from structuraguard.contracts.llm import LLMCallRecord, LLMErrorCode
 from structuraguard.contracts.parsing import (
+    LogJsonSelector,
+    LogParsePlan,
     ParsePlan,
     ParsePlanValidationRequest,
     PhysicalSample,
@@ -618,18 +624,20 @@ class HybridStructureAnalyzer:
             ).propose(request, replay=replay)
             if isinstance(proposed, StructurePlanCreated):
                 evidence = proposed.plan.confidence
+                agrees = base is not None and (
+                    self._shape(base) == self._shape(proposed.plan)
+                    or self._log_json_refinement(base, proposed.plan)
+                )
                 agreement = (
                     Decimal(1)
-                    if base is not None
-                    and self._shape(base) == self._shape(proposed.plan)
+                    if agrees
                     else Decimal("0.85")
                     if evidence >= Decimal("0.85")
                     else Decimal("0.5")
                 )
                 issues = (
                     (semantic_issue("SEMANTIC_PLAN_DISAGREEMENT"),)
-                    if base is not None
-                    and self._shape(base) != self._shape(proposed.plan)
+                    if base is not None and not agrees
                     else ()
                 )
                 if len(profile.candidates) > 1:
@@ -692,6 +700,36 @@ class HybridStructureAnalyzer:
             )[: self.policy.max_issues],
             provider_metadata=run.calls,
             execution_issue=execution_issue,
+        )
+
+    @staticmethod
+    def _log_json_refinement(base: ParsePlan, proposed: ParsePlan) -> bool:
+        """После replay validation JSON-поля уточняют raw record без смены границ."""
+        if not isinstance(base, LogParsePlan) or not isinstance(proposed, LogParsePlan):
+            return False
+        if (
+            base.line_refs != proposed.line_refs
+            or base.max_lines_per_record != 1
+            or proposed.max_lines_per_record != 1
+            or len(base.fields) != 1
+            or not isinstance(base.fields[0].selector, LogRecordSelector)
+            or len(base.entities) != 1
+            or len(proposed.entities) != 1
+            or any(
+                not isinstance(field.selector, LogJsonSelector)
+                or field.selector.line_offset != 0
+                for field in proposed.fields
+            )
+        ):
+            return False
+        before, after = base.entities[0], proposed.entities[0]
+        return (
+            isinstance(before.grouping, ExplicitRecordGrouping)
+            and before.grouping == after.grouping
+            and before.parent_entity_id is None
+            and after.parent_entity_id is None
+            and not before.identity_field_ids
+            and not after.identity_field_ids
         )
 
     @staticmethod

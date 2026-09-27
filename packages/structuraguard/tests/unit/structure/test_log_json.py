@@ -1,6 +1,7 @@
 """LLM → закрытый JSON selector → replay validation/execution с LINE provenance."""
 
 import json
+from decimal import Decimal
 from functools import partial
 
 import pytest
@@ -11,6 +12,7 @@ from tests.unit.structure.test_execution import execute, prepared, stream
 
 from structuraguard.contracts.common import (
     PhysicalObjectKind,
+    PipelineStatus,
     SemanticParsingMode,
     ValidationDecision,
 )
@@ -100,7 +102,10 @@ async def test_llm_first_reports_rejected_json_selector_at_the_source_line() -> 
 
 
 @pytest.mark.anyio
-async def test_llm_json_selection_keeps_clean_values_and_original_line() -> None:
+@pytest.mark.parametrize("reverse_records", [False, True])
+async def test_llm_json_selection_keeps_clean_values_and_original_line(
+    reverse_records: bool,
+) -> None:
     rows = [
         {
             "requestID": "00000000-0000-4000-8000-000000000001",
@@ -231,6 +236,65 @@ async def test_llm_json_selection_keeps_clean_values_and_original_line() -> None
                 value.origins[0].raw_value.value == content.decode().splitlines()[index]
             )
             assert value.transformations == ("select_json",)
+
+    if reverse_records:
+        entity = proposal.entities[0]
+        suggestion = suggestion.model_copy(
+            update={
+                "plan": proposal.model_copy(
+                    update={
+                        "entities": (
+                            entity.model_copy(
+                                update={"records": tuple(reversed(entity.records))}
+                            ),
+                        )
+                    }
+                )
+            }
+        )
+    provider = FakeLLMProvider(
+        (ScriptedResponse(output_json=suggestion.canonical_json()),), clock=fixed_clock
+    )
+    async with SemanticParsingSession(
+        replay=lambda: stream(batches),
+        policy=ParsingPolicy(
+            mode=SemanticParsingMode.LLM_FIRST,
+            structural=LLMStructurePolicy(confidence_threshold=Decimal("0.9")),
+        ),
+        provider=provider,
+        scanner=Scanner(),
+        context=context(),
+        clock=fixed_clock,
+        timer=lambda: 0,
+    ) as session:
+        semantic_analysis = await session.analyze_structure()
+        if reverse_records:
+            assert any(
+                issue.code == "SEMANTIC_PLAN_DISAGREEMENT"
+                for issue in semantic_analysis.issues
+            )
+            _ = [batch async for batch in session.parse_semantically()]
+            assert session.report is not None
+            assert session.report.status is PipelineStatus.NEEDS_REVIEW
+            return
+        assert semantic_analysis.issues == ()
+        assert semantic_analysis.assessment.confidence >= Decimal("0.9")
+        assert semantic_analysis.assessment.agreement == 1
+        plan = await session.create_parse_plan()
+        assert plan is not None
+        assert all(isinstance(field.selector, LogJsonSelector) for field in plan.fields)
+        semantic_output = [batch async for batch in session.parse_semantically()]
+        assert session.report is not None
+        assert session.report.status is PipelineStatus.COMPLETED, session.report.issues
+        assert provider.call_count == 1
+        assert [
+            [value.normalized_value.value for value in record.entities[0].values]
+            for batch in semantic_output
+            for record in batch.records
+        ] == [
+            [row["requestID"], row["date"], row["message"], row["level"], None]
+            for row in rows
+        ]
 
 
 @pytest.mark.anyio
