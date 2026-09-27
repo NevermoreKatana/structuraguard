@@ -27,6 +27,7 @@ from structuraguard.contracts.loading import (
 )
 from structuraguard.contracts.record_validation import ValidationRecord
 from structuraguard.domain.constraint_semantics import unique_keys
+from structuraguard.domain.constraint_values import database_scalar
 from structuraguard.mapping import MappingPlanValidator
 from structuraguard.ports.validation import ConstraintReader
 from structuraguard.validation import DatabaseConstraintValidator
@@ -55,7 +56,19 @@ def _dependencies(
     rows: tuple[ValidationRecord, ...], tables: dict[str, TableCatalog], max_work: int
 ) -> dict[str, set[str]]:
     dependencies: dict[str, set[str]] = {r.record_id: set() for r in rows}
-    values = {r.record_id: {c.field_id: c.value for c in r.values} for r in rows}
+    columns = {
+        tid: {column.column_id: column for column in table.columns}
+        for tid, table in tables.items()
+    }
+    values = {
+        row.record_id: {
+            cell.field_id: database_scalar(
+                columns[row.collection_id][cell.field_id], cell.value
+            )
+            for cell in row.values
+        }
+        for row in rows
+    }
     specifications = {
         (fk.referenced_table_id, fk.referenced_column_ids)
         for t in tables.values()
@@ -161,7 +174,9 @@ async def build_plan(
     ):
         raise failure("DRY_RUN_MAPPING_REJECTED")
     evidence = validation.evidence
-    verify_mapped_parents(prepared, policy.read_policy.limits.max_evaluations)
+    verify_mapped_parents(
+        prepared, policy.read_policy.limits.max_evaluations, catalog=catalog
+    )
     tables = {t.table_id: t for s in catalog.schemas for t in s.tables}
     identities = {i.table_id: i.column_ids for i in evidence.identities}
     # M11 подтверждает отсутствующий PK identity только для INSERT. Его значение

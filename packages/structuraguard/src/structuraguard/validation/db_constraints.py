@@ -25,7 +25,7 @@ from structuraguard.contracts.record_validation import (
     ValidationRecord,
 )
 from structuraguard.domain.constraint_semantics import UniqueKey, unique_keys
-from structuraguard.domain.constraint_values import field_codes
+from structuraguard.domain.constraint_values import database_scalar, field_codes
 from structuraguard.domain.database_fingerprint import verify_database_fingerprint
 from structuraguard.ports.validation import ConstraintReader
 
@@ -244,6 +244,7 @@ class _State:
         used: set[tuple[str, str | None, str]] = set()
         for tid, rows in self.rows.items():
             table = self.tables[tid]
+            columns = {column.column_id: column for column in table.columns}
             expressions: list[tuple[str | None, str]] = [
                 (None, expression) for expression in table.check_constraints
             ]
@@ -282,7 +283,24 @@ class _State:
                 ).validate(
                     ValidationDataset(
                         records=tuple(
-                            r.model_copy(update={"parent_id": None}) for r in rows
+                            row.model_copy(
+                                update={
+                                    "parent_id": None,
+                                    "values": tuple(
+                                        cell.model_copy(
+                                            update={
+                                                "value": database_scalar(
+                                                    columns[cell.field_id], cell.value
+                                                )
+                                            }
+                                        )
+                                        if cell.field_id in columns
+                                        else cell
+                                        for cell in row.values
+                                    ),
+                                }
+                            )
+                            for row in rows
                         )
                     ),
                     rules=binding.rules,
@@ -347,7 +365,10 @@ class _State:
         if any(c not in values for c in columns):
             self.out.add("DB_CONSTRAINT_UNVERIFIED", row, columns)
             return None
-        return tuple(values[c] for c in columns)
+        catalog_columns = {
+            c.column_id: c for c in self.tables[row.collection_id].columns
+        }
+        return tuple(database_scalar(catalog_columns[c], values[c]) for c in columns)
 
     def add_lookup(
         self,
@@ -453,12 +474,29 @@ class _State:
                     )
 
     def unique(self, tid: str, rows: list[ValidationRecord], key: UniqueKey) -> None:
+        table = self.tables[tid]
+        columns = {column.column_id: column for column in table.columns}
+        generated_key = (
+            self.operations[tid].operation == "insert"
+            and key.column_ids == table.primary_key
+            and all(
+                (metadata := columns[cid].inspection) is not None
+                and (metadata.identity is not None or metadata.rowid_alias)
+                for cid in key.column_ids
+            )
+        )
         seen: dict[tuple[tuple[str, object], ...], ValidationRecord] = {}
         reported: set[str] = set()
         for row in rows:
             self.out.tick()
             if not key.supported:
                 self.out.add("DB_CONSTRAINT_UNVERIFIED", row, key.column_ids)
+                continue
+            # Отсутствующий PK identity проверит БД при INSERT. Прогноз не
+            # вызывает sequence и не использует неизвестный ключ для FK/UPSERT.
+            if generated_key and all(
+                cid not in self.values[row.record_id] for cid in key.column_ids
+            ):
                 continue
             values = self.key_values(row, key.column_ids)
             if values is None or (

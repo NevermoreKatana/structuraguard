@@ -27,8 +27,8 @@ pytestmark = pytest.mark.anyio
         ("person@example.org", "integer", "incompatible"),
         ("7707083893", "integer", "incompatible"),
         ("000123", "text", "compatible"),
-        ("2026-09-01", "date", "conditional"),
-        ("550e8400-e29b-41d4-a716-446655440000", "uuid", "conditional"),
+        ("2026-09-01", "date", "compatible"),
+        ("550e8400-e29b-41d4-a716-446655440000", "uuid", "compatible"),
     ],
 )
 async def test_value_type_mismatch_has_no_name_override(

@@ -17,7 +17,7 @@ from structuraguard.contracts.constraint_validation import (
 )
 from structuraguard.contracts.database import DatabaseMetadataSnapshot, TableCatalog
 from structuraguard.domain.constraint_semantics import unique_keys
-from structuraguard.domain.constraint_values import field_codes
+from structuraguard.domain.constraint_values import database_scalar, field_codes
 from structuraguard.domain.database_fingerprint import verify_database_fingerprint
 
 from ._inspection import failure
@@ -182,6 +182,7 @@ def _predicate(
             | DateTimeScalar,
         ):
             raise failure("DB_CONSTRAINT_UNVERIFIED")
+        scalar = database_scalar(column, scalar)
         value: object = scalar.value
         if kind == "uuid" and isinstance(scalar, StringScalar):
             value = UUID(scalar.value)

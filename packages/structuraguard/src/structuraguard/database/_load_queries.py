@@ -16,6 +16,7 @@ from structuraguard.contracts.loading import (
     PostgreSQLLoadPolicy,
 )
 from structuraguard.domain.constraint_semantics import unique_keys
+from structuraguard.domain.constraint_values import database_scalar
 from structuraguard.loading.projection import Prepared, failure
 
 from ._constraint_queries import _relation
@@ -125,7 +126,7 @@ def statements(
         values: dict[str, object] = {}
         for cell in row.values:
             column = columns[cell.field_id]
-            scalar = cell.value
+            scalar = database_scalar(column, cell.value)
             value: object = scalar.value
             if (
                 column.inspection is not None

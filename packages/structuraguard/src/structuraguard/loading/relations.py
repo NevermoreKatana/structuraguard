@@ -1,15 +1,32 @@
 """Явная привязка mapped_parent к source record/entity, без поиска по догадке."""
 
 from structuraguard.contracts.common import NullScalar
+from structuraguard.contracts.database import DatabaseCatalog
+from structuraguard.domain.constraint_values import database_scalar
 from structuraguard.loading.projection import Prepared, failure
 from structuraguard.validation.business_rules import scalar_key
 
 
-def verify_mapped_parents(prepared: Prepared, max_work: int) -> None:
+def verify_mapped_parents(
+    prepared: Prepared, max_work: int, *, catalog: DatabaseCatalog
+) -> None:
     records = {r.record_id: r for b in prepared.request.batches for r in b.records}
     entities = {e.entity_id: e for r in records.values() for e in r.entities}
     rows = prepared.data.records
-    cells = {r.record_id: {c.field_id: c.value for c in r.values} for r in rows}
+    columns = {
+        table.table_id: {column.column_id: column for column in table.columns}
+        for schema in catalog.schemas
+        for table in schema.tables
+    }
+    cells = {
+        row.record_id: {
+            cell.field_id: database_scalar(
+                columns[row.collection_id][cell.field_id], cell.value
+            )
+            for cell in row.values
+        }
+        for row in rows
+    }
     work = 0
     for relation in prepared.request.mapping.relations or ():
         if relation.strategy != "mapped_parent":

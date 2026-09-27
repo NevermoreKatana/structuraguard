@@ -44,6 +44,24 @@ def null_text_compatible(field: NormalizedFieldProfile, column: ColumnCatalog) -
     )
 
 
+def serialized_scalar_compatible(field: NormalizedFieldProfile, target: str) -> bool:
+    """Полные признаки DATE/UUID допускают проверку канонической записи в M12.
+
+    Профиль не разрешает cast: каждое значение ещё проверяется field_codes;
+    локальные даты, неканонические UUID и повреждённые значения не загружаются.
+    """
+    return (
+        target in {"date", "uuid"}
+        and field.non_null_count > 0
+        and field.string_count == field.non_null_count
+        and any(
+            p.code == ("iso_date" if target == "date" else "canonical_uuid")
+            and p.count == field.non_null_count
+            for p in field.patterns
+        )
+    )
+
+
 def expected_patterns(
     column: ColumnCatalog, semantic_type: str | None
 ) -> tuple[str, ...]:
@@ -249,6 +267,10 @@ def type_compatibility(
         "date": {"date"},
         "datetime": {"datetime"},
     }
+    if serialized_scalar_compatible(field, target):
+        if field.inference.status == "insufficient_evidence":
+            blockers.discard("TYPE_EVIDENCE_INCOMPLETE")
+        return Compatibility("compatible", Decimal(1), tuple(sorted(blockers)))
     if observed and observed <= native.get(target, set()):
         # Малый файл не доказывает semantic type, но полные string values уже
         # совместимы с TEXT без нормализации и риска потери ведущих нулей.

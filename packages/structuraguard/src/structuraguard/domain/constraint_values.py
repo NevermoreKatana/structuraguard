@@ -1,5 +1,6 @@
 """Проверки typed DB values без coercion, округления или вычисления CHECK SQL."""
 
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -15,6 +16,27 @@ from structuraguard.contracts.common import (
     StringScalar,
 )
 from structuraguard.contracts.database import ColumnCatalog, DatabaseType
+
+
+def database_scalar(column: ColumnCatalog, value: NormalizedScalar) -> NormalizedScalar:
+    """Связать каноническую ISO DATE с типом БД без изменения значения.
+
+    JSON не имеет типа date. Принимается только точное YYYY-MM-DD, без
+    locale guessing, обрезания времени или исправления несуществующих дат.
+    Тот же scalar нужен ключам, read-only lookup и writer.
+    """
+    if column.inspection is None or not isinstance(value, StringScalar):
+        return value
+    data_type = column.inspection.data_type
+    while data_type.type_kind == "domain" and data_type.base_type is not None:
+        data_type = data_type.base_type
+    if data_type.canonical_type != "date" or len(value.value) != 10:
+        return value
+    try:
+        parsed = date.fromisoformat(value.value)
+    except ValueError:
+        return value
+    return DateScalar(value=parsed) if parsed.isoformat() == value.value else value
 
 
 def field_codes(
@@ -41,6 +63,7 @@ def field_codes(
         return ("DB_NOT_NULL",) if required and not default else ()
     if isinstance(value, NullScalar):
         return ("DB_NOT_NULL",) if required else ()
+    value = database_scalar(column, value)
     code: list[str] = []
     expected = dt.canonical_type
     matches = {

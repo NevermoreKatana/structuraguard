@@ -7,7 +7,11 @@ from structuraguard.contracts.database import ColumnCatalog
 from structuraguard.contracts.mapping_rules import MappingIssueLocation
 from structuraguard.contracts.profiling import NormalizedFieldProfile
 
-from ._compatibility import null_text_compatible, type_compatibility
+from ._compatibility import (
+    null_text_compatible,
+    serialized_scalar_compatible,
+    type_compatibility,
+)
 from ._validation_report import Issues
 
 
@@ -97,6 +101,10 @@ def check_type(
         ):
             issues.add("MAPPING_TYPE_UNVERIFIED", location)
         if null_text_compatible(profile, column):
+            return
+        if data_type.type_kind in {None, "builtin"} and serialized_scalar_compatible(
+            profile, target
+        ):
             return
     else:
         kinds = (

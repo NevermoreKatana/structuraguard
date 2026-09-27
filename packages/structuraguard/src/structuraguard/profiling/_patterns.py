@@ -55,7 +55,10 @@ def _dates(text: str, locale: LocalePolicy, result: Scan) -> None:
         if len(dates) > 1:
             result.reasons.add("locale_ambiguity")
         else:
-            result.parsed.append(DateScalar(value=next(iter(dates))))
+            parsed = next(iter(dates))
+            result.parsed.append(DateScalar(value=parsed))
+            if parsed.isoformat() == text:
+                result.patterns.add("iso_date")
     if re.fullmatch(
         r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,6})?)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])?",
         text,
@@ -198,6 +201,10 @@ def scan_string(text: str, locale: LocalePolicy, *, money_hint: bool) -> Scan:
         result.patterns.add("boolean")
         result.candidates.add("boolean")
     _dates(normalized, locale, result)
+    if normalized != text:
+        result.patterns.discard("iso_date")
+    if "uuid" in result.patterns and str(UUID(text)) == text:
+        result.patterns.add("canonical_uuid")
     if not result.patterns and len(text) >= 32:
         result.patterns.add("free_text")
     return result
