@@ -48,7 +48,6 @@ async def test_shapes_deduplicate_literal_scalar_paths_without_copying_values() 
         "requestID": "synthetic-private-value",
         "context": {"empty": None, "enabled": True, "status.code": 200},
         "arbitrary/поле": "another-private-value",
-        "items": [{"not_selectable": "hidden-value"}],
     }
     request, batches = await request_for(*(json.dumps(row) for _ in range(19)))
     catalog = await prepare_samples(
@@ -76,9 +75,7 @@ async def test_shapes_deduplicate_literal_scalar_paths_without_copying_values() 
     ]
     descriptor = canonical_json_value(catalog.payload["log_json_shapes"])
     assert "private-value" not in descriptor
-    assert "hidden-value" not in descriptor
     assert "timestamp" not in descriptor
-    assert "not_selectable" not in descriptor
     assert len(descriptor.encode()) < 400
 
 
@@ -131,6 +128,8 @@ async def test_shapes_keep_distinct_scope_and_exclude_unsampled_line_keys() -> N
         "plain message",
         '["array"]',
         '{"items":[1,2]}',
+        '{"message":"keep","items":[{"nested":"value"}]}',
+        '{"message":"keep","context":{"items":[]}}',
     ],
 )
 async def test_invalid_or_non_scalar_objects_do_not_advertise_json_paths(

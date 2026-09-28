@@ -290,7 +290,10 @@ def _log_json_paths(
                 if len(path) >= 30 or not key or len(key) > 256:
                     return None
                 stack.append((child, (*path, key)))
-        elif not isinstance(value, list):
+        elif isinstance(value, list):
+            # Частичная shape не должна закрепить потерю неподдерживаемых полей.
+            return None
+        else:
             paths.append(path)
             if len(paths) > policy.max_fields:
                 return None

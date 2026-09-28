@@ -45,7 +45,12 @@ from ._boundary import (
     sanitized_provider_error,
 )
 from ._http import read_bounded, safe_transport
-from ._structured import LLMPromptTemplate, LLMResponseSchema, parse_object
+from ._structured import (
+    LLMPromptTemplate,
+    LLMResponseSchema,
+    _PreparedResponseSchema,
+    parse_object,
+)
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -348,7 +353,7 @@ class OpenAICompatibleProvider:
                 raise
             raise LLMProviderError(LLMErrorCode.UNAVAILABLE) from None
 
-    def _wire(self, request: LLMRequest) -> tuple[bytes, LLMResponseSchema]:
+    def _wire(self, request: LLMRequest) -> tuple[bytes, _PreparedResponseSchema]:
         caps = self.capabilities
         enforce_security_route(request, caps)
         if request.data_classification not in self._config.allowed_classifications or (
@@ -365,13 +370,16 @@ class OpenAICompatibleProvider:
         )
         if prompt is None or prompt.identity != request.prompt or schema is None:
             raise LLMProviderError(LLMErrorCode.CAPABILITY_MISMATCH)
-        schema_object = parse_object(schema.schema_json)
+        prepared = schema.prepare_decoding(
+            request.payload_json if caps.json_schema else None
+        )
+        schema_object = parse_object(prepared.schema_json)
         response_format: dict[str, object] = {"type": "json_object"}
         if caps.json_schema:
             response_format = {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "sg_" + schema.fingerprint.removeprefix("sha256:")[:48],
+                    "name": "sg_" + prepared.fingerprint.removeprefix("sha256:")[:48],
                     "strict": True,
                     "schema": schema_object,
                 },
@@ -384,7 +392,7 @@ class OpenAICompatibleProvider:
             "Return only a JSON object conforming to the response schema."
         )
         if not caps.json_schema:
-            output_instruction += " Response schema: " + schema.schema_json
+            output_instruction += " Response schema: " + prepared.schema_json
         messages: list[dict[str, str]] = [{"role": "system", "content": prompt.text}]
         messages.append(
             {
@@ -418,7 +426,7 @@ class OpenAICompatibleProvider:
             or upper_bound + caps.max_output_tokens > caps.context_window_tokens
         ):
             raise LLMProviderError(LLMErrorCode.CONTEXT_LIMIT)
-        return body, schema
+        return body, prepared
 
     async def _exchange(self, body: bytes) -> dict[str, object]:
         import httpx
@@ -488,7 +496,7 @@ class OpenAICompatibleProvider:
         self,
         request: LLMRequest,
         envelope: dict[str, object],
-        schema: LLMResponseSchema,
+        schema: _PreparedResponseSchema,
     ) -> LLMResponse:
         try:
             choices = envelope.get("choices")
@@ -536,6 +544,7 @@ class OpenAICompatibleProvider:
                 model_id=self.capabilities.model_id,
                 response_schema_id=request.response_schema_id,
                 response_schema_version=request.response_schema_version,
+                decoding_schema_fingerprint=schema.fingerprint,
                 output_json=canonical,
                 prompt_fingerprint=request.prompt_fingerprint,
                 prompt=request.prompt,

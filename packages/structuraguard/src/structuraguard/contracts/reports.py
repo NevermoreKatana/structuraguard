@@ -1142,6 +1142,9 @@ class LLMResponse(FrozenContract):
     response_schema_id: IdentifierStr
     response_schema_version: VersionStr
     output_json: _CanonicalJson = Field(repr=False)
+    decoding_schema_fingerprint: FingerprintStr | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     prompt_fingerprint: FingerprintStr
     prompt: LLMPrompt | None = Field(
         default=None, repr=False, exclude_if=lambda value: value is None

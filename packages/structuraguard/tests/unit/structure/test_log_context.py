@@ -15,6 +15,7 @@ from structuraguard.contracts import (
     ProviderCapabilities,
     SemanticParsingMode,
 )
+from structuraguard.contracts._base import canonical_sha256_value
 from structuraguard.contracts.llm import LLMExecutionEnvironment
 from structuraguard.contracts.semantic import (
     LLMStructurePolicy,
@@ -55,17 +56,20 @@ async def test_syslog_request_preserves_nineteen_events_in_native_context() -> N
     source = source_for(content, display_name="events.log")
     batches = await collect(LogParser(), source, contexts_for(source, content)[1])
     seen: list[httpx.Request] = []
-    names = ("requestID", "date", "message", "level")
+    paths: list[tuple[str, ...]] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         wire = json.loads(request.content)
         payload = json.loads(wire["messages"][-1]["content"])
         scope = tuple(item["ref"] for item in payload["source_catalog"])
+        paths.extend(
+            tuple(path) for path in payload["log_json_shapes"][0]["scalar_paths"]
+        )
         fields = tuple(
             SemanticFieldProposal(
-                field_id=name.lower(),
-                semantic_name=name.lower(),
+                field_id=f"f{index}",
+                semantic_name=path[-1].lower(),
                 semantic_type="string",
                 locale_hint=None,
                 source_refs=scope[:4],
@@ -73,14 +77,17 @@ async def test_syslog_request_preserves_nineteen_events_in_native_context() -> N
                     kind="log_json",
                     index=None,
                     offset=0,
-                    path=(SemanticPathStep(operation="key", name=name, occurrence=0),),
+                    path=tuple(
+                        SemanticPathStep(operation="key", name=key, occurrence=0)
+                        for key in path
+                    ),
                     value_source=None,
                     delimiter=None,
                     target=None,
                     key_equals=None,
                 ),
             )
-            for name in names
+            for index, path in enumerate(paths)
         )
         suggestion = LLMStructureSuggestion(
             schema_version="1.0.0",
@@ -99,10 +106,10 @@ async def test_syslog_request_preserves_nineteen_events_in_native_context() -> N
                 fields=fields,
                 entities=(
                     SemanticEntityProposal(
-                        entity_id="events",
+                        entity_id="records",
                         entity_type="events",
                         parent_entity_id=None,
-                        field_ids=tuple(name.lower() for name in names),
+                        field_ids=tuple(f"f{index}" for index in range(len(paths))),
                         path=(),
                         records=tuple((ref,) for ref in scope),
                     ),
@@ -184,11 +191,20 @@ async def test_syslog_request_preserves_nineteen_events_in_native_context() -> N
         assert session.report is not None
         assert session.report.status is PipelineStatus.COMPLETED, session.report.issues
         assert len(seen) == session.report.llm_calls == 1
+        assert len(paths) == 7
+        assert session.report.plan is not None
+        assert session.report.plan.semantic_analysis is not None
+        assert (
+            session.report.plan.semantic_analysis.response_schema_fingerprint
+            == canonical_sha256_value(wire["response_format"]["json_schema"]["schema"])
+        )
         assert [
             [value.normalized_value.value for value in record.entities[0].values]
             for batch in output
             for record in batch.records
-        ] == [[row[name] for name in names] for row in rows]
+        ] == [
+            ["1" if len(path) == 2 else row[path[0]] for path in paths] for row in rows
+        ]
         assert all(
             value.origins[0].source_ref.kind.value == "line"
             for batch in output
