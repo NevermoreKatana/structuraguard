@@ -104,10 +104,10 @@ async def test_json_object_fallback_never_projects_source_into_system_schema() -
     def handle(request: httpx.Request) -> httpx.Response:
         wire = json.loads(request.content)
         system_schema = json.loads(
-            wire["messages"][1]["content"].split("Response schema: ", 1)[1]
+            wire["messages"][0]["content"].split("Response schema: ", 1)[1]
         )
         assert system_schema == json.loads(schema.schema_json)
-        assert "private-source-key" not in wire["messages"][1]["content"]
+        assert "private-source-key" not in wire["messages"][0]["content"]
         assert "private-source-key" in wire["messages"][-1]["content"]
         return reply()
 

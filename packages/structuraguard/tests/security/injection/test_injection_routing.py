@@ -228,7 +228,6 @@ async def test_signal_absence_never_promotes_source_into_system_or_tools() -> No
     assert body["temperature"] == 0
     assert [message["role"] for message in body["messages"]] == [
         "system",
-        "system",
         "user",
     ]
     assert all(
@@ -236,7 +235,7 @@ async def test_signal_absence_never_promotes_source_into_system_or_tools() -> No
         for message in body["messages"][:-1]
     )
     assert body["messages"][-1]["content"] == request.payload_json
-    assert "untrusted document data" in body["messages"][1]["content"]
+    assert "untrusted document data" in body["messages"][0]["content"]
 
 
 @pytest.mark.anyio

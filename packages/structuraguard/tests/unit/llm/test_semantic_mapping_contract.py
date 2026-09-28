@@ -119,7 +119,10 @@ async def test_http_modes_keep_schema_prompt_and_no_tools(native: bool) -> None:
         "json_schema" if native else "json_object"
     )
     assert "tools" not in wire and "functions" not in wire
-    assert wire["messages"][0]["content"] == semantic_mapping_prompt().text
+    assert [message["role"] for message in wire["messages"]] == ["system", "user"]
+    assert wire["messages"][0]["content"].startswith(
+        semantic_mapping_prompt().text + "\n\n"
+    )
     assert [m["content"] for m in wire["messages"] if m["role"] == "user"] == [
         contract_request().payload_json
     ]

@@ -397,14 +397,16 @@ class OpenAICompatibleProvider:
         )
         if not caps.json_schema:
             output_instruction += " Response schema: " + prepared.schema_json
-        messages: list[dict[str, str]] = [{"role": "system", "content": prompt.text}]
-        messages.append(
+        # Некоторые chat templates (включая Qwen) принимают system только
+        # первым сообщением. Объединяем trusted инструкции, сохраняя данные
+        # источника отдельно и без изменения их роли или содержимого.
+        messages: list[dict[str, str]] = [
             {
                 "role": "system",
-                "content": output_instruction,
-            }
-        )
-        messages.append({"role": "user", "content": request.payload_json})
+                "content": prompt.text + "\n\n" + output_instruction,
+            },
+            {"role": "user", "content": request.payload_json},
+        ]
         body = json.dumps(
             {
                 "model": caps.model_id,
