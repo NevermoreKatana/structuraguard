@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Self, cast
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, StrictInt, StrictStr, model_validator
+from pydantic import Field, SecretStr, StrictBool, StrictInt, StrictStr, model_validator
 
 from structuraguard.contracts._base import (
     CanonicalValue,
@@ -90,7 +90,8 @@ class OpenAICompatibleHeader(FrozenContract):
 class OpenAICompatibleConfig(FrozenContract):
     """Trusted deployment; secrets и endpoint отсутствуют в safe serialization.
 
-    Locality назначает host application. HTTP разрешён только numeric loopback;
+    Locality назначает host application. HTTP вне numeric loopback требует
+    явного allow_insecure_http от trusted host application;
     query/userinfo/fragment и произвольные paths запрещены даже с fake transport.
     Token upper bound: UTF-8 bytes полного wire + deployment-specific overhead.
     Overhead должен покрывать скрытый chat template выбранного deployment.
@@ -98,6 +99,7 @@ class OpenAICompatibleConfig(FrozenContract):
 
     endpoint: StrictStr = Field(repr=False, exclude=True)
     api_key: SecretStr | None = Field(default=None, repr=False, exclude=True)
+    allow_insecure_http: StrictBool = False
     headers: tuple[OpenAICompatibleHeader, ...] = Field(
         default=(), repr=False, exclude=True, max_length=16
     )
@@ -133,12 +135,13 @@ class OpenAICompatibleConfig(FrozenContract):
                 raise ValueError
             if (
                 url.scheme == "http"
+                and not self.allow_insecure_http
                 and not ipaddress.ip_address(url.hostname).is_loopback
             ):
                 raise ValueError
         except ValueError:
             raise ValueError(
-                "Требуется credential-free HTTPS endpoint либо HTTP numeric loopback /v1/chat/completions"
+                "Требуется credential-free HTTPS endpoint либо явно разрешённый HTTP /v1/chat/completions"
             ) from None
         caps = self.capabilities
         if (
@@ -236,6 +239,7 @@ class OpenAICompatibleProvider:
         deployment = canonical_sha256_value(
             {
                 "endpoint": self._config.endpoint,
+                "allow_insecure_http": self._config.allow_insecure_http,
                 "header_names": sorted(h.name.lower() for h in self._config.headers),
                 "allowed_classifications": self._config.allowed_classifications,
                 "input_token_overhead": self._config.input_token_overhead,

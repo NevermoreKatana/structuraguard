@@ -39,6 +39,30 @@ def test_credential_bearing_urls_are_rejected_without_echo(endpoint: str) -> Non
     assert "secret-canary" not in error.value.json()
 
 
+@pytest.mark.parametrize("host", ("192.0.2.42:8080", "llm.example.test:8080"))
+def test_remote_plain_http_requires_explicit_trusted_opt_in(host: str) -> None:
+    endpoint = f"http://{host}/v1/chat/completions"
+    with pytest.raises(ValidationError):
+        OpenAICompatibleConfig(endpoint=endpoint, capabilities=capabilities())
+    config = OpenAICompatibleConfig(
+        endpoint=endpoint,
+        capabilities=capabilities(),
+        allow_insecure_http=True,
+    )
+    assert config.allow_insecure_http
+    assert endpoint not in config.model_dump_json()
+
+
+@pytest.mark.parametrize("suffix", ("?key=secret-canary", "#secret-canary", "/other"))
+def test_http_opt_in_does_not_allow_credentials_or_arbitrary_paths(suffix: str) -> None:
+    with pytest.raises(ValidationError):
+        OpenAICompatibleConfig(
+            endpoint=f"http://192.0.2.42/v1/chat/completions{suffix}",
+            capabilities=capabilities(),
+            allow_insecure_http=True,
+        )
+
+
 @pytest.mark.anyio
 async def test_config_credentials_are_only_sent_in_headers_and_never_persist_in_metadata(
     caplog: pytest.LogCaptureFixture,

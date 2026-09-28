@@ -381,3 +381,13 @@ findings в проверенном scope не осталось.
 Real deployment и remote CI не запускались. Остаточные ограничения: trusted
 classification/approval и token overhead, обязательный usage/exact model ID,
 ограниченный Chat Completions wire, отсутствие PII scanner и semantic analyzers.
+
+### Внешний HTTP endpoint
+
+`OpenAICompatibleConfig.allow_insecure_http` по умолчанию `False`. Trusted host
+может явно включить его для собственного HTTP Chat Completions endpoint вне
+numeric loopback. Это осознанная передача ключа и payload без TLS; HTTPS
+предпочтителен. Флаг не меняет locality, classification allowlist, запрет
+redirects, credentials в URL, query/fragment или посторонних путей. Endpoint и
+ключ по-прежнему исключены из сериализации; разрешение входит в deployment
+fingerprint. Пример: `http://192.0.2.42:8080/v1/chat/completions`.
