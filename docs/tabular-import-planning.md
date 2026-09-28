@@ -120,7 +120,14 @@ fallback используют общую схему с обязательной 
 операцию и уверенность; `prepared.preview` содержит первые три строки до и после.
 Эти данные чувствительны: обычные логи не должны включать их сериализацию.
 
-Реальные примеры разрешены только при явном `LOCAL_ONLY` и локальном provider.
+По умолчанию реальные примеры разрешены только при `LOCAL_ONLY` и локальном provider.
+Для внешнего `FIXED` требуется `TabularImportOptions.external_approval` с
+`TabularExternalApproval`: fingerprints `TabularImportSource`, каталога, scope и
+router policy, а также разрешённые лимиты выборки. Trusted host создаёт DTO только
+после проверки отдельного явного согласия на эти данные, таблицу и получателя;
+ответ модели или входной JSON не являются согласием. SDK проверяет совпадение
+привязок и пределов до вызова scanner/provider. RESTRICTED cloud, secrets и
+fallback остаются запрещены. См. [ADR 0040](adr/0040-scoped-external-tabular-consent.md).
 Класс данных не ниже `CONFIDENTIAL`, неизвестная metadata сохраняет `RESTRICTED`.
 SDK самостоятельно запрещает выявленные secrets и active content, добавляет
 injection scan и требует exact-bound approval внешнего scanner. Defaults:

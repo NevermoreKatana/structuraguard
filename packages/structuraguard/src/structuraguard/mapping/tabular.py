@@ -1,4 +1,4 @@
-"""Локальный LLM-планировщик декларативного импорта до штатного ingest."""
+"""LLM-планировщик декларативного импорта до штатного ingest."""
 
 import asyncio
 import json
@@ -301,17 +301,18 @@ def _split_candidates(
 
 
 class TabularImportPlanner:
-    """Составить copy/split план через явно локальную LLM с проверкой всех строк.
+    """Составить copy/split план через разрешённую LLM с проверкой всех строк.
 
     Args:
-        router: Run-scoped PolicyAwareLLMRouter с режимом LOCAL_ONLY.
+        router: Run-scoped router LOCAL_ONLY либо FIXED с external_approval.
         scanner: Trusted base scanner; SDK самостоятельно добавляет injection veto.
         context: Identity router и нижние границы классификации.
         min_confidence: Минимальная уверенность плана и каждого выбора, default .85.
         options: Конечные лимиты выборки, каталога, payload и времени.
 
-    Сырые примеры разрешены только LOCAL_ONLY. Они чувствительны и не предназначены
-    для logs. Известные secrets запрещены даже локально. Конструктор не выполняет
+    Сырые примеры внешнему FIXED-маршруту требуют отдельного согласия host на
+    конкретные данные, каталог и получателя. Известные secrets запрещены даже
+    локально; RESTRICTED внешнему provider запрещён. Конструктор не выполняет
     I/O. SDK не загружает строки и не исполняет SQL; полученный план и derived JSON
     должны пройти штатный ingest. Один instance не допускает concurrent plan.
     """
@@ -372,7 +373,10 @@ class TabularImportPlanner:
         """
         if self._busy:
             raise LLMProviderError(LLMErrorCode.BUDGET_EXCEEDED)
-        if self._router.policy.mode is not LLMRoutingMode.LOCAL_ONLY:
+        if self._router.policy.mode is not LLMRoutingMode.LOCAL_ONLY and not (
+            self._router.policy.mode is LLMRoutingMode.FIXED
+            and self._options.external_approval is not None
+        ):
             raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
         self._busy = True
         try:
@@ -398,6 +402,8 @@ class TabularImportPlanner:
                 error_code="TABULAR_IMPORT_INPUT_INVALID",
                 message="Источник должен быть непустой прямоугольной таблицей.",
             ) from None
+        if self._router.policy.mode is LLMRoutingMode.FIXED:
+            self._check_external_approval(source, catalog, scope)
         targets = tabular_import_targets(catalog, scope)
         if (
             not targets
@@ -473,6 +479,36 @@ class TabularImportPlanner:
             "Цикл планирования должен завершиться результатом или ошибкой"
         )
 
+    def _check_external_approval(
+        self, source: TabularImportSource, catalog: DatabaseCatalog, scope: MappingScope
+    ) -> None:
+        approval = self._options.external_approval
+        if approval is None:
+            raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
+        bindings = {
+            "source_fingerprint": source.fingerprint,
+            "database_fingerprint": catalog.database_fingerprint,
+            "scope_fingerprint": scope.fingerprint,
+            "routing_policy_fingerprint": self._router.policy_fingerprint,
+        }
+        mismatch = [
+            key for key, value in bindings.items() if getattr(approval, key) != value
+        ]
+        if mismatch or (
+            self._options.max_sample_rows > approval.max_sample_rows
+            or self._options.max_sample_chars > approval.max_sample_chars
+        ):
+            raise TabularImportError(
+                error_code="LLM_POLICY_DENIED",
+                message="Запрос выходит за границы согласия на внешнее планирование.",
+                details={
+                    "reason": "external_approval_mismatch"
+                    if mismatch
+                    else "external_approval_limits",
+                    "bindings": tuple(mismatch),
+                },
+            )
+
     async def _suggest(
         self,
         source: TabularImportSource,
@@ -499,7 +535,12 @@ class TabularImportPlanner:
             routing_policy_id=self._router.policy.policy_id,
             routing_policy_fingerprint=self._router.policy_fingerprint,
             redaction_fingerprint=canonical_sha256_value(
-                {"version": "tabular_local_samples_v1", "payload": payload_hash}
+                {
+                    "version": "tabular_local_samples_v1"
+                    if self._router.policy.mode is LLMRoutingMode.LOCAL_ONLY
+                    else "tabular_approved_samples_v1",
+                    "payload": payload_hash,
+                }
             ),
         )
         request = await self._approved_request(scan)

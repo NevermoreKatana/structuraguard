@@ -35,6 +35,23 @@ type TabularWireScore = Annotated[
 ]
 
 
+class TabularExternalApproval(SensitiveMappingContract):
+    """Подтверждение trusted host после явного согласия на конкретную передачу.
+
+    Host проверяет сохранённое согласие пользователя до создания DTO; сам DTO
+    не заменяет эту проверку. Привязки запрещают перенос разрешения на другой
+    snapshot, каталог, scope или маршрут. Secrets/RESTRICTED и security scanner
+    остаются обязательными ограничениями независимо от согласия.
+    """
+
+    source_fingerprint: FingerprintStr
+    database_fingerprint: FingerprintStr
+    scope_fingerprint: FingerprintStr
+    routing_policy_fingerprint: FingerprintStr
+    max_sample_rows: Annotated[PositiveInt, Field(le=32)] = 8
+    max_sample_chars: Annotated[PositiveInt, Field(le=2048)] = 256
+
+
 class TabularImportOptions(SensitiveMappingContract):
     """Бюджеты запроса; строки целиком проверяет отдельный pure executor."""
 
@@ -44,6 +61,7 @@ class TabularImportOptions(SensitiveMappingContract):
     max_response_bytes: Annotated[PositiveInt, Field(le=131072)] = 32768
     max_seconds: Annotated[float, Field(gt=0, le=300, allow_inf_nan=False)] = 300
     max_columns: Annotated[PositiveInt, Field(le=128)] = 64
+    external_approval: TabularExternalApproval | None = None
 
 
 class TabularImportSource(SensitiveMappingContract):

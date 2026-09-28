@@ -51,7 +51,8 @@ SDK не выбирает за модель `copy`, не меняет значе
 последовательный декодер выбирать confidence и delimiter до исходного поля.
 Fingerprint схемы остаётся каноническим; формат полей и проверка ответа не ослаблены.
 
-Реальные bounded samples доступны только при явной LOCAL_ONLY policy. SDK
+По умолчанию реальные bounded samples доступны только при LOCAL_ONLY policy.
+Ограниченное внешнее согласие описано в [ADR 0040](0040-scoped-external-tabular-consent.md). SDK
 проверяет secrets, injection и exact approval запроса; локальность не снимает
 resource limits. Семантическая уверенность модели является эвристикой, поэтому
 обычные ограничения типов/БД, staging, dry-run и транзакция остаются обязательны.
