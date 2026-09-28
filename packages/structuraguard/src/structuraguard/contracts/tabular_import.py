@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, StrictStr, model_validator
+from pydantic import Field, StrictStr, WithJsonSchema, model_validator
 
 from structuraguard.contracts._base import canonical_sha256_value
 from structuraguard.contracts.common import FingerprintStr, NonNegativeInt, PositiveInt
@@ -31,7 +31,22 @@ type TabularReason = Literal[
 type TabularSourceId = Annotated[StrictStr, Field(pattern=r"^s[0-9]{1,3}$")]
 type TabularTargetId = Annotated[StrictStr, Field(pattern=r"^c[0-9]{1,3}$")]
 type TabularWireScore = Annotated[
-    Decimal, Field(ge=0, le=1, allow_inf_nan=False, max_digits=7, decimal_places=6)
+    Decimal,
+    Field(ge=0, le=1, allow_inf_nan=False, max_digits=7, decimal_places=6),
+    # Автосхема Decimal содержит look-ahead, который Rust grammar не поддерживает.
+    # Меняем только wire schema; Decimal и его строгие проверки остаются в SDK.
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {"type": "number", "minimum": 0, "maximum": 1},
+                {
+                    "type": "string",
+                    "pattern": r"^(?:0(?:\.[0-9]{1,6})?|1(?:\.0{1,6})?)$",
+                },
+            ]
+        },
+        mode="validation",
+    ),
 ]
 
 

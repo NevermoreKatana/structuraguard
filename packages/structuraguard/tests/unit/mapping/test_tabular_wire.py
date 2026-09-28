@@ -6,6 +6,7 @@ from typing import cast
 
 import pytest
 from pydantic import ValidationError
+from pydantic_core import SchemaValidator, core_schema
 
 from structuraguard.contracts._base import CanonicalValue, canonical_json_value
 from structuraguard.exceptions import LLMProviderError
@@ -86,6 +87,69 @@ def payload(*, sources: int = 3, targets: int = 4) -> str:
             "required_target_ids": [],
         }
     )
+
+
+def _compile_patterns(node: object) -> int:
+    if isinstance(node, list):
+        return sum(_compile_patterns(item) for item in node)
+    if not isinstance(node, dict):
+        return 0
+    count = 0
+    if isinstance(node.get("pattern"), str):
+        # Rust regex отвергает look-around, как grammar backend внешней LLM.
+        SchemaValidator(core_schema.str_schema(pattern=node["pattern"]))
+        count = 1
+    return count + sum(_compile_patterns(value) for value in node.values())
+
+
+@pytest.mark.parametrize("projected", [False, True])
+def test_native_tabular_patterns_compile_without_lookaround(projected: bool) -> None:
+    schema = tabular_import_response_schema().prepare_decoding(
+        payload() if projected else None
+    )
+    assert _compile_patterns(json.loads(schema.schema_json)) > 0
+
+
+@pytest.mark.parametrize(
+    "score", [0, 1, 0.85, "0", "1", "0.000001", "0.999999", "1.000000"]
+)
+def test_portable_scores_retain_decimal_values(score: object) -> None:
+    candidate = response(choice(confidence=score))
+    candidate["confidence"] = score
+    text = encoded(candidate)
+    tabular_import_response_schema().prepare_decoding(
+        payload(sources=1, targets=1)
+    ).validate(text)
+    wire = parsed(candidate)
+    assert wire.confidence == wire.fields[0].confidence == Decimal(str(score))
+
+
+@pytest.mark.parametrize(
+    "score",
+    [
+        -0.01,
+        1.01,
+        0.1234567,
+        "-0.01",
+        "1.000001",
+        "0.1234567",
+        "NaN",
+        "Infinity",
+        True,
+        None,
+    ],
+)
+@pytest.mark.parametrize("field_score", [False, True])
+def test_portable_schema_keeps_runtime_score_limits(
+    score: object, field_score: bool
+) -> None:
+    candidate = response(choice(confidence=score) if field_score else choice())
+    if not field_score:
+        candidate["confidence"] = score
+    schema = tabular_import_response_schema()
+    for validator in (schema, schema.prepare_decoding(payload(sources=1, targets=1))):
+        with pytest.raises(LLMProviderError, match="LLM_SCHEMA_VIOLATION"):
+            validator.validate(encoded(candidate))
 
 
 def test_conversion_preserves_copy_split_order_and_explicit_omission() -> None:

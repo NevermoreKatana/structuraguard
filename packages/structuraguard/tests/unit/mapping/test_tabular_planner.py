@@ -558,7 +558,7 @@ def test_new_registry_entries_have_closed_schema_and_value_semantics_prompt() ->
 def test_schema_describes_one_decision_per_source_before_its_action() -> None:
     registered = tabular_import_response_schema()
     schema = json.loads(registered.schema_json)
-    assert registered.version == "2.1.0"
+    assert registered.version == "2.1.1"
     assert list(schema["properties"]) == ["fields", "confidence", "decision"]
     field = schema["$defs"]["_TabularFieldDecision"]
     assert list(field["properties"])[:4] == [
