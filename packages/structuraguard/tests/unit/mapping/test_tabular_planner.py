@@ -7,7 +7,7 @@ import pytest
 from tests.fakes.mapping import catalog, column, scope_for, table
 from tests.fakes.semantic_mapping import RecordingScanner, fake_provider, router_for
 
-from structuraguard.contracts._base import canonical_json_value
+from structuraguard.contracts._base import CanonicalValue, canonical_json_value
 from structuraguard.contracts.common import DataClassification
 from structuraguard.contracts.llm import LLMExecutionEnvironment, LLMRoutingMode
 from structuraguard.contracts.reports import (
@@ -55,14 +55,61 @@ def output(*, score: str = "0.980000", target: str = "c1") -> str:
     )
 
 
+def wire_answer(answer: str) -> str:
+    """Перенести старые public fixtures на новый wire, не менять production DTO."""
+    body = json.loads(answer)
+    if "assignments" not in body:
+        return answer
+    groups: dict[str, list[dict[str, CanonicalValue]]] = {}
+    for item in body["assignments"]:
+        groups.setdefault(item["source_id"], []).append(item)
+    fields = []
+    for source_id, items in groups.items():
+        first = items[0]
+        if "delimiter" not in first:
+            return answer
+        fields.append(
+            {
+                "source_id": source_id,
+                "explanation": "The source meaning matches the chosen target.",
+                "operation": first["operation"],
+                "target_ids": [item["target_id"] for item in items],
+                "split_mode": first["split_mode"],
+                "delimiter": first["delimiter"],
+                "confidence": first["confidence"],
+            }
+        )
+    for item in body.get("omissions", []):
+        fields.append(
+            {
+                "source_id": item["source_id"],
+                "explanation": "No target has the source meaning.",
+                "operation": "omit",
+                "target_ids": [],
+                "split_mode": None,
+                "delimiter": None,
+                "confidence": item["confidence"],
+            }
+        )
+    return canonical_json_value(
+        {
+            "decision": body["decision"],
+            "fields": fields,
+            "confidence": body["confidence"],
+        }
+    )
+
+
 def planner(
     answer: str = "{}",
     *more_answers: str,
     mode: LLMRoutingMode = LLMRoutingMode.LOCAL_ONLY,
     cloud: bool = False,
     options: TabularImportOptions | None = None,
+    min_confidence: Decimal = Decimal(".85"),
 ) -> tuple[TabularImportPlanner, RecordingScanner]:
-    provider = fake_provider(answer, *more_answers)
+    answer = wire_answer(answer)
+    provider = fake_provider(answer, *(wire_answer(item) for item in more_answers))
     if cloud:
         from tests.fakes.llm import fixed_clock
 
@@ -91,6 +138,7 @@ def planner(
                 metadata_classification=DataClassification.PUBLIC,
             ),
             options=options,
+            min_confidence=min_confidence,
         ),
         scanner,
     )
@@ -285,30 +333,23 @@ async def test_model_output_is_not_repaired_or_filled_with_default_fields() -> N
 @pytest.mark.parametrize(
     "changes",
     [
-        {"part_index": 0},
-        {"part_count": 2},
+        {"target_ids": []},
+        {"target_ids": ["c0", "c1"]},
         {"delimiter": "|"},
         {"split_mode": "whitespace"},
-        {
-            "operation": "split",
-            "split_mode": "whitespace",
-            "part_index": 0,
-            "part_count": 1,
-        },
-        {"operation": "split", "split_mode": "whitespace", "part_count": 2},
+        {"operation": "split", "split_mode": "whitespace"},
+        {"operation": "split", "target_ids": ["c0", "c1"]},
         {
             "operation": "split",
             "split_mode": "whitespace",
             "delimiter": " ",
-            "part_index": 0,
-            "part_count": 2,
+            "target_ids": ["c0", "c1"],
         },
         {
             "operation": "split",
             "split_mode": "literal",
             "delimiter": None,
-            "part_index": 0,
-            "part_count": 2,
+            "target_ids": ["c0", "c1"],
         },
     ],
 )
@@ -316,8 +357,8 @@ async def test_wire_schema_rejects_inconsistent_copy_and_split_parameters(
     changes: dict[str, object],
 ) -> None:
     db = catalog(table("t", column("postal_code")))
-    body = json.loads(output(target="c0"))
-    body["assignments"][0].update(changes)
+    body = json.loads(wire_answer(output(target="c0")))
+    body["fields"][0].update(changes)
     sdk, _ = planner(canonical_json_value(body))
     with pytest.raises(LLMProviderError, match="LLM_SCHEMA_VIOLATION"):
         await sdk.plan(
@@ -380,49 +421,37 @@ def test_new_registry_entries_have_closed_schema_and_value_semantics_prompt() ->
     assert "none were filtered by name similarity" in prompt.text
 
 
-def test_schema_branches_force_null_copy_parameters_and_complete_split_parameters() -> (
-    None
-):
+def test_schema_describes_one_decision_per_source_before_its_action() -> None:
     registered = tabular_import_response_schema()
     schema = json.loads(registered.schema_json)
-    assert registered.version == "1.4.0"
-    item = schema["properties"]["assignments"]["items"]
-    if "$ref" in item:
-        item = schema["$defs"][item["$ref"].rsplit("/", 1)[1]]
-    assert len(item["anyOf"]) == 3
-    copy = schema["$defs"]["TabularCopyChoice"]["properties"]
-    assert list(copy)[:3] == ["source_id", "target_id", "operation"]
-    assert copy["operation"]["const"] == "copy"
-    for key in ("split_mode", "delimiter", "part_index", "part_count"):
-        assert copy[key]["type"] == "null"
-    split = schema["$defs"]["TabularWhitespaceSplitChoice"]["properties"]
-    assert split["operation"]["const"] == "split"
-    assert split["part_count"]["minimum"] == 2
-    assert split["part_index"]["type"] == "integer"
-    assert split["split_mode"]["const"] == "whitespace"
-    assert split["delimiter"]["type"] == "null"
-    literal = schema["$defs"]["TabularLiteralSplitChoice"]["properties"]
-    assert literal["split_mode"]["const"] == "literal"
-    assert literal["delimiter"]["type"] == "string"
-    assert literal["delimiter"]["minLength"] == 1
-    assert literal["delimiter"]["maxLength"] == 8
+    assert registered.version == "2.0.0"
+    assert list(schema["properties"]) == ["decision", "fields", "confidence"]
+    field = schema["$defs"]["_TabularFieldDecision"]
+    assert list(field["properties"])[:4] == [
+        "source_id",
+        "explanation",
+        "operation",
+        "target_ids",
+    ]
+    assert field["properties"]["target_ids"]["maxItems"] == 8
+    assert field["properties"]["explanation"]["maxLength"] == 240
 
 
 def test_prompt_distinguishes_compound_labels_from_values_without_example_bias() -> (
     None
 ):
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.9.0"
-    assert "NOT source fields" in prompt.text
-    assert "part_index 0 AND 1" in prompt.text
+    assert prompt.version == "1.10.0"
+    assert "covering ALL parts" in prompt.text
     assert "compound LABEL is not evidence of a compound VALUE" in prompt.text
     assert "validation_feedback" in prompt.text
     assert '"assignments":[' not in prompt.text
-    assert "EXACTLY ONE assignment" in prompt.text
+    assert "exactly ONE fields entry" in prompt.text
     assert (
-        "Both component columns must be populated even if they are nullable"
-        in prompt.text
+        "family_name" in prompt.text and "given_name, even when nullable" in prompt.text
     )
+    assert "payload.min_confidence" in prompt.text
+    assert "never raise scores" in prompt.text
 
 
 def postal_answer(*, hallucinated_split: bool) -> str:
@@ -532,7 +561,8 @@ async def test_replanning_requires_new_exact_scanner_approval() -> None:
             return report
 
     provider = fake_provider(
-        postal_answer(hallucinated_split=True), postal_answer(hallucinated_split=False)
+        wire_answer(postal_answer(hallucinated_split=True)),
+        wire_answer(postal_answer(hallucinated_split=False)),
     )
     sdk = TabularImportPlanner(
         router=router_for(provider, mode=LLMRoutingMode.LOCAL_ONLY),
@@ -557,7 +587,7 @@ async def test_replanning_requires_new_exact_scanner_approval() -> None:
     assert provider.call_count == 1
 
 
-async def test_duplicate_copy_is_replanned_instead_of_filling_optional_columns() -> (
+async def test_target_collision_is_replanned_instead_of_overwriting_another_source() -> (
     None
 ):
     db = catalog(
@@ -570,7 +600,7 @@ async def test_duplicate_copy_is_replanned_instead_of_filling_optional_columns()
     )
     good = postal_answer(hallucinated_split=False)
     duplicate = json.loads(good)
-    duplicate["assignments"].append({**duplicate["assignments"][1], "target_id": "c0"})
+    duplicate["assignments"][1]["target_id"] = duplicate["assignments"][0]["target_id"]
     sdk, scanner = planner(canonical_json_value(duplicate), good)
     labels = ("почта", "почтовый_код")
     rows: tuple[dict[str, str | None], ...] = (
@@ -581,9 +611,8 @@ async def test_duplicate_copy_is_replanned_instead_of_filling_optional_columns()
         {"email": "ann1a@example.test", "postal_code": "101000"},
     )
     feedback = json.loads(scanner.payloads[1])["validation_feedback"]
-    assert feedback["code"] == "TABULAR_IMPORT_OPERATION_INVALID"
-    assert feedback["actual"]["assignment_count"] == 2
-    assert feedback["expected"]["assignment_count"] == 1
+    assert feedback["code"] == "TABULAR_IMPORT_TARGET_COLLISION"
+    assert feedback["source_id"] == "s1"
 
 
 async def test_missing_required_column_feedback_uses_model_alias_not_database_id() -> (
@@ -649,3 +678,19 @@ async def test_literal_split_evidence_comes_from_values_not_source_label() -> No
     assert execute_tabular_import(("Место",), rows, db, scope_for(db), plan).rows[
         1
     ] == {"city": "Москва", "country": "Россия"}
+
+
+@pytest.mark.parametrize("threshold", [Decimal(".85"), Decimal(".97")])
+async def test_required_confidence_is_part_of_the_approved_payload(
+    threshold: Decimal,
+) -> None:
+    db = catalog(table("t", column("postal_code")))
+    sdk, scanner = planner(output(target="c0"), min_confidence=threshold)
+    await sdk.plan(
+        labels=("Индекс",),
+        rows=({"Индекс": "101000"},),
+        catalog=db,
+        scope=scope_for(db),
+    )
+    assert json.loads(scanner.payloads[0])["min_confidence"] == str(threshold)
+    assert scanner.requests[0].payload_json == scanner.payloads[0]
