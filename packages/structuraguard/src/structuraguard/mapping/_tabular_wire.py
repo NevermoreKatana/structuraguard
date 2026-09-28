@@ -23,7 +23,7 @@ from structuraguard.llm._structured import parse_object
 
 class _TabularFieldDecision(SensitiveMappingContract):
     source_id: TabularSourceId
-    explanation: Annotated[StrictStr, Field(min_length=1, max_length=240)]
+    explanation: Annotated[StrictStr, Field(min_length=1, max_length=120)]
     operation: Literal["copy", "split", "omit"]
     target_ids: Annotated[tuple[TabularTargetId, ...], Field(max_length=8)]
     split_mode: Literal["whitespace", "literal"] | None
@@ -56,11 +56,11 @@ class _TabularFieldDecision(SensitiveMappingContract):
 class TabularImportWireResponse(SensitiveMappingContract):
     """Короткое объяснение предшествует решению и не переносится в публичный план."""
 
-    decision: Literal["map", "ambiguous", "unsupported"]
     fields: Annotated[
         tuple[_TabularFieldDecision, ...], Field(min_length=1, max_length=128)
     ]
     confidence: TabularWireScore
+    decision: Literal["map", "ambiguous", "unsupported"]
 
     @model_validator(mode="after")
     def _sources(self) -> Self:

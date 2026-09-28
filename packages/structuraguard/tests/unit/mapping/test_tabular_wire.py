@@ -49,7 +49,15 @@ def payload(*, sources: int = 3, targets: int = 4) -> str:
     return encoded(
         {
             "source_fields": [
-                {"source_id": f"s{i}", "label": f"private-source-label-{i}"}
+                {
+                    "source_id": f"s{i}",
+                    "label": f"private-source-label-{i}",
+                    "sample_values": [
+                        "private-value",
+                        "second-private-value",
+                        "third-private-value",
+                    ],
+                }
                 for i in range(sources)
             ],
             "target_columns": [
@@ -59,7 +67,14 @@ def payload(*, sources: int = 3, targets: int = 4) -> str:
             "sample_rows": [
                 {
                     "row_index": i + 1,
-                    "values": {f"s{j}": "private-value" for j in range(sources)},
+                    "values": {
+                        f"s{j}": (
+                            "private-value",
+                            "second-private-value",
+                            "third-private-value",
+                        )[i % 3]
+                        for j in range(sources)
+                    },
                     "truncated_sources": [],
                 }
                 for i in range(19)
@@ -171,7 +186,7 @@ def test_whitespace_split_retains_every_part_at_the_upper_bound() -> None:
         {"source_id": "invented"},
         {"target_ids": ["invented"]},
         {"explanation": ""},
-        {"explanation": "x" * 241},
+        {"explanation": "x" * 121},
         {"reason": "semantic_equivalence"},
     ],
 )
@@ -187,8 +202,8 @@ def test_wire_requires_unique_source_decisions_and_explanation_generation_order(
 ):
     with pytest.raises(ValidationError):
         parsed(response(choice(), choice(target_ids=["c1"])))
-    wire = parsed(response(choice(explanation="x" * 240)))
-    assert len(wire.fields[0].explanation) == 240
+    wire = parsed(response(choice(explanation="x" * 120)))
+    assert len(wire.fields[0].explanation) == 120
     properties = type(wire.fields[0]).model_json_schema()["properties"]
     assert list(properties).index("explanation") < list(properties).index("operation")
 

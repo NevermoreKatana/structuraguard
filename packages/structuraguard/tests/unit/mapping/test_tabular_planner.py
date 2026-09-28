@@ -160,7 +160,12 @@ async def test_cyrillic_semantics_receive_real_values_and_all_scoped_columns() -
     assert plan.assignments[0].confidence == Decimal(".98")
     payload = json.loads(scanner.payloads[0])
     assert payload["source_fields"] == [
-        {"source_id": "s0", "label": "Индекс", "split_candidates": []}
+        {
+            "source_id": "s0",
+            "label": "Индекс",
+            "sample_values": ["666333", "001234"],
+            "split_candidates": [],
+        }
     ]
     assert payload["sample_rows"][0]["values"] == {"s0": "666333"}
     assert {c["column"] for c in payload["target_columns"]} == {
@@ -417,15 +422,15 @@ def test_new_registry_entries_have_closed_schema_and_value_semantics_prompt() ->
     assert set(schema["required"]) == set(schema["properties"])
     prompt = tabular_import_prompt()
     assert prompt.prompt_id == "tabular_import_planning"
-    assert "real sample values" in prompt.text
-    assert "none were filtered by name similarity" in prompt.text
+    assert "sample_values" in prompt.text
+    assert "by meaning" in prompt.text
 
 
 def test_schema_describes_one_decision_per_source_before_its_action() -> None:
     registered = tabular_import_response_schema()
     schema = json.loads(registered.schema_json)
-    assert registered.version == "2.0.0"
-    assert list(schema["properties"]) == ["decision", "fields", "confidence"]
+    assert registered.version == "2.1.0"
+    assert list(schema["properties"]) == ["fields", "confidence", "decision"]
     field = schema["$defs"]["_TabularFieldDecision"]
     assert list(field["properties"])[:4] == [
         "source_id",
@@ -434,24 +439,22 @@ def test_schema_describes_one_decision_per_source_before_its_action() -> None:
         "target_ids",
     ]
     assert field["properties"]["target_ids"]["maxItems"] == 8
-    assert field["properties"]["explanation"]["maxLength"] == 240
+    assert field["properties"]["explanation"]["maxLength"] == 120
 
 
 def test_prompt_distinguishes_compound_labels_from_values_without_example_bias() -> (
     None
 ):
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.10.0"
-    assert "covering ALL parts" in prompt.text
-    assert "compound LABEL is not evidence of a compound VALUE" in prompt.text
-    assert "validation_feedback" in prompt.text
-    assert '"assignments":[' not in prompt.text
-    assert "exactly ONE fields entry" in prompt.text
-    assert (
-        "family_name" in prompt.text and "given_name, even when nullable" in prompt.text
-    )
-    assert "payload.min_confidence" in prompt.text
-    assert "never raise scores" in prompt.text
+    assert prompt.version == "1.11.0"
+    assert "order of ALL components" in prompt.text
+    assert "family name plus given name" in prompt.text
+    assert "omissions are valid and do not make the plan ambiguous" in prompt.text
+    assert "Never invent values, cast data, SQL or code" in prompt.text
+    assert "one fields entry per source, including empty fields" in prompt.text
+    assert "honest confidence" in prompt.text
+    assert "After all fields: decision" in prompt.text
+    assert "under 120 characters" in prompt.text
 
 
 def postal_answer(*, hallucinated_split: bool) -> str:
@@ -694,3 +697,26 @@ async def test_required_confidence_is_part_of_the_approved_payload(
     )
     assert json.loads(scanner.payloads[0])["min_confidence"] == str(threshold)
     assert scanner.requests[0].payload_json == scanner.payloads[0]
+
+
+async def test_inline_sample_evidence_is_distinct_and_already_bounded() -> None:
+    db = catalog(table("t", column("postal_code")))
+    rows: tuple[dict[str, str | None], ...] = (
+        {"value": "first-private-suffix"},
+        {"value": "first-private-suffix"},
+        {"value": None},
+        {"value": ""},
+        {"value": "later-private-suffix"},
+    )
+    sdk, scanner = planner(
+        output(target="c0"), options=TabularImportOptions(max_sample_chars=5)
+    )
+    await sdk.plan(labels=("value",), rows=rows, catalog=db, scope=scope_for(db))
+    payload = json.loads(scanner.payloads[0])
+    samples = payload["source_fields"][0]["sample_values"]
+    assert samples == ["first", None, ""]
+    assert all(
+        any(row["values"]["s0"] == value for row in payload["sample_rows"])
+        for value in samples
+    )
+    assert "private-suffix" not in scanner.payloads[0]
