@@ -141,7 +141,7 @@ class MarkdownParser:
         source: SourceArtifact,
         context: ProbeContext,
     ) -> ProbeResult:
-        """Подтвердить Markdown только по bounded structural markers."""
+        """Проверить markers; Markdown suffix допускает lossless text fallback."""
 
         sample = await read_probe_sample(source, context, self._limits)
         binary = binary_container_probe(
@@ -158,7 +158,7 @@ class MarkdownParser:
             limits=self._limits,
         )
         lines = probe_lines(text, max_lines=_MAX_PROBE_LINES)
-        supported = is_text_like(text) and _has_markdown_structure(
+        structured = is_text_like(text) and _has_markdown_structure(
             lines,
             allow_inline_links=_has_markdown_advisory(source),
         )
@@ -166,7 +166,7 @@ class MarkdownParser:
             kind=ProbeSignalKind.INTERNAL_STRUCTURE,
             outcome=(
                 ProbeSignalOutcome.MATCH
-                if supported
+                if structured
                 else ProbeSignalOutcome.INCONCLUSIVE
             ),
         )
@@ -175,6 +175,24 @@ class MarkdownParser:
             media_types=_MEDIA_TYPES,
             extensions=_EXTENSIONS,
         )
+        fallback = (
+            not structured
+            and is_text_like(text)
+            and any(
+                signal.kind is ProbeSignalKind.EXTENSION
+                and signal.outcome is ProbeSignalOutcome.MATCH
+                for signal in advisory
+            )
+        )
+        supported = structured or fallback
+        signals: tuple[ProbeSignal, ...] = (structure, *advisory)
+        if fallback:
+            signals += (
+                ProbeSignal(
+                    kind=ProbeSignalKind.CONTENT_MEDIA_TYPE,
+                    outcome=ProbeSignalOutcome.MATCH,
+                ),
+            )
         return ProbeResult(
             source=source.ref,
             adapter_id=self.adapter_id,
@@ -183,9 +201,11 @@ class MarkdownParser:
             confidence=detection.confidence if supported else Decimal("0"),
             detected_media_type="text/markdown" if supported else None,
             detected_encoding=detection.reported_encoding,
-            warnings=detection.warnings,
+            warnings=tuple(sorted({*detection.warnings, "PARSER_EXTENSION_FALLBACK"}))
+            if fallback
+            else detection.warnings,
             format_id="markdown" if supported else None,
-            signals=(structure, *advisory),
+            signals=signals,
         )
 
     def parse(

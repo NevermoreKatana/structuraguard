@@ -60,13 +60,13 @@ def test_builtin_json_parsers_returns_two_independent_adapters() -> None:
 @pytest.mark.parametrize(
     ("content", "display_name", "media_type", "expected_adapter", "format_id"),
     (
-        (b"", "empty.log", "text/x-log", "builtin.text", "txt"),
+        (b"", "empty.log", "text/x-log", "builtin.log", "log"),
         (
             b"ordinary prose without structural markers\n",
             "claimed.md",
             "text/markdown",
-            "builtin.text",
-            "txt",
+            "builtin.markdown",
+            "markdown",
         ),
         (
             b"# Content wins over the extension\n",
@@ -86,8 +86,8 @@ def test_builtin_json_parsers_returns_two_independent_adapters() -> None:
             b'{"level":"INFO"}\n{"level":"ERROR"}\n',
             "claimed.log",
             "text/x-log",
-            "builtin.text",
-            "txt",
+            "builtin.log",
+            "log",
         ),
         (
             b"- level=INFO user=alice\n- level=ERROR user=bob\n",

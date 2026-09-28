@@ -71,7 +71,8 @@ class ProbeSignalKind(StrEnum):
 
     ``SIGNATURE``, ``CONTENT_MEDIA_TYPE`` и ``INTERNAL_STRUCTURE`` являются
     сильными сигналами. ``DECLARED_MEDIA_TYPE`` и ``EXTENSION`` используются
-    как advisory metadata и сами по себе не подтверждают формат.
+    как advisory metadata и сами по себе не подтверждают формат. EXTENSION
+    может разрешить конфликт уже подтверждённых content-compatible candidates.
     """
 
     SIGNATURE = "signature"

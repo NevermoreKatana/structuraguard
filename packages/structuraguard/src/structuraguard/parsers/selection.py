@@ -368,6 +368,23 @@ async def select_parser(
         candidate for candidate in eligible if candidate.evidence == maximal_evidence
     )
     format_ids = {candidate.result.format_id for candidate in strongest}
+    extension_fallback = False
+    if len(format_ids) != 1:
+        # Суффикс разрешает конфликт только между content-compatible parsers.
+        # TXT может быть слабее структурных кандидатов, но сохраняет весь текст.
+        matching = tuple(
+            candidate
+            for candidate in eligible
+            if any(
+                signal.kind is ProbeSignalKind.EXTENSION
+                and signal.outcome is ProbeSignalOutcome.MATCH
+                for signal in candidate.result.signals
+            )
+        )
+        if len({candidate.result.format_id for candidate in matching}) == 1:
+            strongest = matching
+            format_ids = {candidate.result.format_id for candidate in strongest}
+            extension_fallback = True
     if len(format_ids) != 1:
         raise ParserError(
             error_code="PARSER_FORMAT_CONFLICT",
@@ -383,7 +400,16 @@ async def select_parser(
             candidate.registration.identity.adapter_id,
         ),
     )
+    result = winner.result
+    if extension_fallback:
+        result = result.model_copy(
+            update={
+                "warnings": tuple(
+                    sorted({*result.warnings, "PARSER_EXTENSION_FALLBACK"})
+                ),
+            },
+        )
     return ParserSelection(
         registration=winner.registration,
-        probe_result=winner.result,
+        probe_result=result,
     )

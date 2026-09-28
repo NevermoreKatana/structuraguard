@@ -89,7 +89,7 @@ async def test_markdown_contract_preserves_ordered_blocks_and_exact_text() -> No
     "content",
     (b"", b"ordinary prose without structural markers\n"),
 )
-async def test_markdown_probe_declines_empty_and_ambiguous_prose(
+async def test_markdown_probe_uses_text_fallback_for_empty_and_ambiguous_prose(
     content: bytes,
 ) -> None:
     source = source_for(content, display_name="claimed.md", media_type="text/markdown")
@@ -97,8 +97,9 @@ async def test_markdown_probe_declines_empty_and_ambiguous_prose(
 
     result = await MarkdownParser().probe(source, probe_context)
 
-    assert not result.supported
-    assert result.format_id is None
+    assert result.supported
+    assert result.format_id == "markdown"
+    assert "PARSER_EXTENSION_FALLBACK" in result.warnings
 
 
 @pytest.mark.anyio

@@ -222,6 +222,10 @@ versioned wire contract для будущего sandbox handshake; измене�
 
 ### Приоритет сигналов
 
+Обновление 2026-09-28: правило отказа при неоднозначности ниже уточнено
+[ADR-0038](../adr/0038-parser-extension-fallback.md). Расширение разрешает
+конфликт только между content-compatible candidates, с явным warning.
+
 Сильные content signals (`signature`, content-derived MIME и подтверждённая
 internal structure) имеют приоритет над declared MIME, а declared MIME — над
 extension. Внутри content vector internal structure стоит первой, чтобы

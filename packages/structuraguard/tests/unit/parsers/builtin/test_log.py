@@ -16,8 +16,27 @@ from tests.unit.parsers.builtin._support import (
 )
 
 from structuraguard.contracts import LineRangeLocation, StringScalar
+from structuraguard.contracts.source import (
+    ProbeResult,
+    ProbeSignalKind,
+    ProbeSignalOutcome,
+)
 from structuraguard.exceptions import ParserError, SecurityPolicyError
 from structuraguard.parsers.builtin import LogParser, LogParserLimits
+
+
+def _assert_text_fallback(result: ProbeResult) -> None:
+    assert result.supported and result.format_id == "log"
+    assert "PARSER_EXTENSION_FALLBACK" in result.warnings
+    assert (
+        next(
+            signal.outcome
+            for signal in result.signals
+            if signal.kind is ProbeSignalKind.INTERNAL_STRUCTURE
+        )
+        is ProbeSignalOutcome.INCONCLUSIVE
+    )
+
 
 _FIRST_EVENT = (
     "2026-09-02 10:45:01 ERROR user_id=15 request failed\r\n"
@@ -164,7 +183,7 @@ async def test_log_contract_preserves_events_captures_and_exact_spans() -> None:
         (b"```log\n" + SYSLOG_JSON + b"```\n", "syslog-example.md"),
     ),
 )
-async def test_log_probe_declines_empty_ambiguous_and_json_lines(
+async def test_log_probe_uses_text_fallback_without_claiming_structure(
     content: bytes,
     display_name: str,
 ) -> None:
@@ -173,8 +192,11 @@ async def test_log_probe_declines_empty_ambiguous_and_json_lines(
 
     result = await LogParser().probe(source, probe_context)
 
-    assert not result.supported
-    assert result.format_id is None
+    if display_name.endswith(".log"):
+        _assert_text_fallback(result)
+    else:
+        assert not result.supported
+        assert result.format_id is None
 
 
 @pytest.mark.anyio
@@ -229,7 +251,7 @@ async def test_log_probe_defers_fixed_capture_limit_until_structure_repeats(
 
     single_result = await parser.probe(single_source, single_context)
 
-    assert not single_result.supported
+    _assert_text_fallback(single_result)
 
     repeated_content = line * 2
     repeated_source = source_for(repeated_content, display_name="repeated.log")
@@ -257,8 +279,7 @@ async def test_log_probe_does_not_treat_unicode_separators_as_event_boundaries()
 
     result = await LogParser().probe(source, probe_context)
 
-    assert not result.supported
-    assert result.format_id is None
+    _assert_text_fallback(result)
 
 
 @pytest.mark.anyio
@@ -277,11 +298,21 @@ async def test_log_key_value_recognizer_requires_complete_bounded_token(
 
     result = await LogParser().probe(source, probe_context)
 
-    assert result.supported is is_supported
+    structured = (
+        next(
+            signal.outcome
+            for signal in result.signals
+            if signal.kind is ProbeSignalKind.INTERNAL_STRUCTURE
+        )
+        is ProbeSignalOutcome.MATCH
+    )
+    assert structured is is_supported
+    if not structured:
+        _assert_text_fallback(result)
 
 
 @pytest.mark.anyio
-async def test_log_probe_declines_json_lines_with_oversized_integer() -> None:
+async def test_log_probe_does_not_claim_structure_for_oversized_json_integer() -> None:
     oversized_integer = "9" * 5_000
     content = (
         f'{{"sequence":{oversized_integer}}}\n{{"sequence":{oversized_integer}}}\n'
@@ -291,8 +322,7 @@ async def test_log_probe_declines_json_lines_with_oversized_integer() -> None:
 
     result = await LogParser().probe(source, probe_context)
 
-    assert not result.supported
-    assert result.format_id is None
+    _assert_text_fallback(result)
 
 
 @pytest.mark.anyio
