@@ -105,6 +105,13 @@ def project_semantic_schema(base: _Schema, payload_json: str) -> _Schema:
                 "key_equals": None,
             }
         }
+        # Последовательный decoder сначала показывает привязку к source path,
+        # затем просит модель определить смысл и тип значения.
+        field["properties"] = {
+            "field_id": properties.pop("field_id"),
+            "selector": properties.pop("selector"),
+            **properties,
+        }
         fields.append(field)
     entity_properties = _object(entity["properties"])
     entity_properties.update(

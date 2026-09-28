@@ -52,6 +52,14 @@ def test_projection_binds_all_paths_records_and_technical_ids() -> None:
         {"operation": "key", "name": "status", "occurrence": 0},
     ]
     for field in fields:
+        assert list(field["properties"]) == [
+            "field_id",
+            "selector",
+            "semantic_name",
+            "semantic_type",
+            "locale_hint",
+            "source_refs",
+        ]
         assert "const" not in field["properties"]["semantic_name"]
         assert "const" not in field["properties"]["semantic_type"]
     entity = props["entities"]["prefixItems"][0]["properties"]
