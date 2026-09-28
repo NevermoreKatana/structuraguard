@@ -52,6 +52,9 @@ def payload(*, sources: int = 3, targets: int = 4) -> str:
                 {
                     "source_id": f"s{i}",
                     "label": f"private-source-label-{i}",
+                    "copy_type_compatible_target_ids": [
+                        f"c{j}" for j in range(targets)
+                    ],
                     "sample_values": [
                         "private-value",
                         "second-private-value",

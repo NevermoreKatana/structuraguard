@@ -164,6 +164,7 @@ async def test_cyrillic_semantics_receive_real_values_and_all_scoped_columns() -
             "source_id": "s0",
             "label": "Индекс",
             "sample_values": ["666333", "001234"],
+            "copy_type_compatible_target_ids": ["c0", "c1"],
             "split_candidates": [],
         }
     ]
@@ -446,7 +447,7 @@ def test_prompt_distinguishes_compound_labels_from_values_without_example_bias()
     None
 ):
     prompt = tabular_import_prompt()
-    assert prompt.version == "1.11.0"
+    assert prompt.version == "1.12.0"
     assert "order of ALL components" in prompt.text
     assert "family name plus given name" in prompt.text
     assert "omissions are valid and do not make the plan ambiguous" in prompt.text

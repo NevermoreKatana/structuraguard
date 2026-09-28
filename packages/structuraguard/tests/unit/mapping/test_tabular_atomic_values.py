@@ -7,7 +7,7 @@ import pytest
 from tests.fakes.mapping import catalog, column, scope_for, table
 from tests.unit.mapping.test_tabular_planner import output, planner
 
-from structuraguard.contracts._base import canonical_json_value
+from structuraguard.contracts._base import CanonicalValue, canonical_json_value
 from structuraguard.contracts.tabular_import import (
     TabularImportOptions,
     TabularImportSource,
@@ -206,3 +206,107 @@ def test_typed_target_guard_checks_later_rows_before_publishing() -> None:
         bind_tabular_import_plan(source, db, scope_for(db), suggestion)
     assert caught.value.error_code == "TABULAR_IMPORT_TARGET_VALUE_INVALID"
     assert caught.value.details["row_index"] == 19
+
+
+@pytest.mark.parametrize(
+    ("value", "allowed"),
+    [
+        ("123e4567-e89b-42d3-a456-426614174000", ["c1", "c3", "c4", "c5"]),
+        ("2026-09-28", ["c2", "c3", "c4", "c5"]),
+        ("12", ["c0", "c3", "c4", "c5"]),
+        ("18:42:16.123456", ["c3", "c4", "c5"]),
+        ("worker", ["c3", "c4", "c5"]),
+        (None, ["c0", "c1", "c2", "c3", "c4", "c5"]),
+    ],
+)
+def test_copy_type_evidence_excludes_only_proven_incompatible_targets(
+    value: str | None, allowed: list[str]
+) -> None:
+    from structuraguard.mapping.tabular import _copy_type_targets
+
+    columns = (
+        column("count", "integer"),
+        column("identifier", "uuid"),
+        column("calendar", "date"),
+        column("description", "text"),
+        column("other", "unknown"),
+        column("unverified").model_copy(update={"inspection": None}),
+    )
+    source = TabularImportSource(labels=("value",), rows=({"value": value},))
+    assert (
+        _copy_type_targets(
+            "value",
+            source,
+            _samples(source, TabularImportOptions()),
+            columns,
+            "postgresql",
+        )
+        == allowed
+    )
+
+
+def test_copy_type_evidence_does_not_test_truncated_original_values() -> None:
+    from structuraguard.mapping.tabular import _copy_type_targets
+
+    source = TabularImportSource(labels=("value",), rows=({"value": "123-invalid"},))
+    samples = _samples(source, TabularImportOptions(max_sample_chars=3))
+    columns = (column("count", "integer"), column("calendar", "date"))
+    assert _copy_type_targets("value", source, samples, columns, "postgresql") == [
+        "c0",
+        "c1",
+    ]
+
+
+def test_one_full_incompatible_sample_is_sufficient_copy_type_evidence() -> None:
+    from structuraguard.mapping.tabular import _copy_type_targets
+
+    source = TabularImportSource(
+        labels=("value",), rows=({"value": "123"}, {"value": "worker"})
+    )
+    assert (
+        _copy_type_targets(
+            "value",
+            source,
+            _samples(source, TabularImportOptions()),
+            (column("count", "integer"),),
+            "postgresql",
+        )
+        == []
+    )
+
+
+@pytest.mark.anyio
+async def test_whole_value_type_evidence_does_not_restrict_split_components() -> None:
+    from structuraguard.mapping.tabular import tabular_import_response_schema
+
+    db = catalog(
+        table("parts", column("first", "integer"), column("second", "integer"))
+    )
+    body: CanonicalValue = {
+        "fields": [
+            {
+                "source_id": "s0",
+                "explanation": "Two integer components have separate destinations.",
+                "operation": "split",
+                "target_ids": ["c0", "c1"],
+                "split_mode": "literal",
+                "delimiter": "|",
+                "confidence": "0.99",
+            }
+        ],
+        "confidence": "0.99",
+        "decision": "map",
+    }
+    answer = canonical_json_value(body)
+    sdk, scanner = planner(answer)
+    rows: tuple[dict[str, str | None], ...] = ({"pair": "12|34"},)
+    plan = await sdk.plan(labels=("pair",), rows=rows, catalog=db, scope=scope_for(db))
+    payload = json.loads(scanner.payloads[0])
+    assert payload["source_fields"][0]["copy_type_compatible_target_ids"] == []
+    assert [target["target_id"] for target in payload["target_columns"]] == ["c0", "c1"]
+    tabular_import_response_schema().prepare_decoding(scanner.payloads[0]).validate(
+        answer
+    )
+    assert execute_tabular_import(("pair",), rows, db, scope_for(db), plan).rows == (
+        {"first": "12", "second": "34"},
+    )
