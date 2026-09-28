@@ -5,6 +5,11 @@ from decimal import Decimal
 
 from pydantic import TypeAdapter, ValidationError
 
+from structuraguard.contracts.common import (
+    IntegerScalar,
+    NormalizedScalar,
+    StringScalar,
+)
 from structuraguard.contracts.database import (
     CatalogColumnRef,
     ColumnCatalog,
@@ -12,6 +17,7 @@ from structuraguard.contracts.database import (
     TableCatalog,
 )
 from structuraguard.contracts.deterministic_mapping import MappingScope, Score
+from structuraguard.contracts.normalization import NormalizationPolicy
 from structuraguard.contracts.tabular_import import (
     TabularImportAssignment,
     TabularImportLineage,
@@ -22,12 +28,15 @@ from structuraguard.contracts.tabular_import import (
     TabularImportSource,
     TabularImportSuggestion,
 )
+from structuraguard.domain.constraint_semantics import base_type
+from structuraguard.domain.constraint_values import field_codes
 from structuraguard.domain.database_fingerprint import verify_database_fingerprint
 from structuraguard.exceptions import (
     ErrorDetailInput,
     MappingError,
     StructuraGuardError,
 )
+from structuraguard.normalization.builtins import BuiltinNormalizer
 
 from ._validation_scope import required
 
@@ -361,6 +370,35 @@ def _assignments(
     return grouped
 
 
+def _target_value_codes(
+    column: ColumnCatalog, value: str | None, dialect: str
+) -> tuple[str, ...]:
+    """Предварительная проверка известных типов без изменения выходных строк.
+
+    INTEGER использует существующие conservative правила normalizer только в
+    проверочной копии. Полная normalization/DB validation остаётся в ingest.
+    """
+    if value is None or column.inspection is None:
+        return ()
+    kind = base_type(column.inspection.data_type).canonical_type
+    if kind not in {"integer", "uuid", "date"}:
+        return ()
+    scalar: NormalizedScalar = StringScalar(value=value)
+    if kind == "integer":
+        checked = BuiltinNormalizer("integer").normalize(
+            scalar, policy=NormalizationPolicy(), parameters=()
+        )
+        if checked.issue_code is not None:
+            return (checked.issue_code,)
+        assert isinstance(checked.value, IntegerScalar)
+        scalar = checked.value
+    return tuple(
+        code
+        for code in field_codes(column, scalar, dialect)
+        if code != "DB_CONSTRAINT_UNVERIFIED"
+    )
+
+
 def execute_tabular_import(
     labels: tuple[str, ...],
     rows: tuple[dict[str, str | None], ...],
@@ -427,6 +465,21 @@ def execute_tabular_import(
                         source_id=source_id,
                         target=item.target,
                         row_index=row_index,
+                    )
+                codes = _target_value_codes(column, value, catalog.dialect)
+                if codes:
+                    assert column.inspection is not None
+                    raise _failure(
+                        "TABULAR_IMPORT_TARGET_VALUE_INVALID",
+                        source_id=source_id,
+                        target=item.target,
+                        row_index=row_index,
+                        actual={"validation_codes": codes, "operation": item.operation},
+                        expected={
+                            "canonical_type": base_type(
+                                column.inspection.data_type
+                            ).canonical_type,
+                        },
                     )
                 output[column.name] = value
         result.append(output)
