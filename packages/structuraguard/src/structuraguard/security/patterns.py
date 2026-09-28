@@ -71,6 +71,10 @@ _ASSIGNMENT = re.compile(
 _BEARER = re.compile(r"(?i)(?<![\w])bearer[ \t]{1,8}")
 _URI = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,31}://", re.ASCII)
 _WORD = re.compile(r"[A-Za-z0-9_./+=$-]+", re.ASCII)
+_UUID = re.compile(
+    r"(?<![A-Za-z0-9])[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}(?![A-Za-z0-9])",
+    re.ASCII,
+)
 
 
 def custom_pattern(pattern: str) -> re.Pattern[str]:
@@ -82,9 +86,20 @@ def custom_pattern(pattern: str) -> re.Pattern[str]:
     return compiled
 
 
-def accepted(category: Category, text: str, policy: DetectionPolicy) -> bool:
+def accepted(category: Category, match: re.Match[str], policy: DetectionPolicy) -> bool:
+    text = match.group()
     if category is Category.CARD:
-        return card_like(text)
+        if not card_like(text):
+            return False
+        # Luhn может случайно совпасть у числового фрагмента UUID. Учитываем
+        # полный UUID в ограниченном окне, а не произвольный label или префикс.
+        # Отдельные карты, явные sensitive fields и custom rules не исключаются.
+        return not any(
+            identifier.start() <= match.start() and match.end() <= identifier.end()
+            for identifier in _UUID.finditer(
+                match.string, max(0, match.start() - 36), match.end() + 36
+            )
+        )
     if category is Category.INN:
         return policy.inn_validation == "pattern" or russian_inn(text) is not None
     if category is Category.PHONE:

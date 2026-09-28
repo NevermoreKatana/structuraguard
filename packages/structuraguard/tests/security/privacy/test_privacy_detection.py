@@ -77,6 +77,51 @@ async def test_custom_patterns_only_add_findings() -> None:
     assert result.classification is C.RESTRICTED
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "abcdefab-cdef-4abc-4111-111111111111",
+        "12345678-1234-4234-8234-123456789abc",
+        "ABCDEFAB-CDEF-4ABC-4111-111111111111",
+    ],
+)
+async def test_uuid_numeric_fragments_are_not_cards(identifier: str) -> None:
+    protector = ContentProtector(DetectionPolicy())
+    text = f'worker: {{"requestId": "{identifier}"}}'
+    report = await protector.classify(text)
+    assert "card" not in {finding.category.value for finding in report.findings}
+    assert report.classification is not C.RESTRICTED
+    # Явное назначение поля важнее формы UUID; custom policy не обходится.
+    restricted = await protector.classify(identifier, field_name="card_number")
+    assert restricted.classification is C.RESTRICTED
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "card", ["4111111111111111", "4111-1111-1111-1111", "4111 1111 1111 1111"]
+)
+async def test_uuid_does_not_hide_a_separate_card_or_secret(card: str) -> None:
+    identifier = "abcdefab-cdef-4abc-4111-111111111111"
+    protector = ContentProtector(DetectionPolicy())
+    for text in (f"{identifier} {card}", f"{card} {identifier}"):
+        report = await protector.classify(text)
+        cards = [f for f in report.findings if f.category.value == "card"]
+        assert len(cards) == 1
+        assert text[cards[0].start : cards[0].end] == card
+        assert report.classification is C.RESTRICTED
+    secret = await protector.classify(f"{identifier} password=synthetic-secret")
+    assert secret.classification is C.RESTRICTED
+
+
+@pytest.mark.anyio
+async def test_non_uuid_prefix_cannot_hide_card() -> None:
+    report = await ContentProtector(DetectionPolicy()).classify(
+        "not-a-uuid-4111-111111111111"
+    )
+    assert any(f.category.value == "card" for f in report.findings)
+
+
 @pytest.mark.parametrize(
     "pattern", [r"(a+)+$", r"(a|aa)+$", r"(?=a)", r"(a)\1", r".*", r"^a*"]
 )

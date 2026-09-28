@@ -227,7 +227,7 @@ class ContentProtector:
                 for pattern in BUILTINS:
                     await budget.spend(len(text) * pattern.cost)
                     for match in pattern.regex.finditer(text):
-                        if accepted(pattern.category, match.group(), self.policy):
+                        if accepted(pattern.category, match, self.policy):
                             add(match.start(), match.end(), pattern.category)
                 await budget.spend(len(text) * 16)
                 for start, end, category in secret_spans(text):

@@ -38,7 +38,7 @@ from structuraguard.parsers.builtin import (
 )
 from structuraguard.parsing import ParsingPolicy
 from structuraguard.pipeline import SourceRequest
-from structuraguard.pipeline.source import text_chunks
+from structuraguard.pipeline.source import classify_source, text_chunks
 
 
 class CloudBoundary:
@@ -58,6 +58,25 @@ class CloudBoundary:
     async def generate_structured(self, request: LLMRequest) -> LLMResponse:
         self.requests.append(request)
         raise LLMProviderError(LLMErrorCode.UNAVAILABLE)
+
+
+@pytest.mark.anyio
+async def test_source_uuid_does_not_become_restricted_card() -> None:
+    source = await engine().inspect_source(
+        request(b'[{"requestId":"abcdefab-cdef-4abc-4111-111111111111"}]')
+    )
+    async with source:
+        reports = await classify_source(source)
+        assert reports
+        assert all(
+            report.classification is not DataClassification.RESTRICTED
+            for report in reports
+        )
+        assert all(
+            category.category.value != "card"
+            for report in reports
+            for category in report.categories
+        )
 
 
 @pytest.mark.anyio
