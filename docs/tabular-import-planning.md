@@ -121,7 +121,11 @@ fallback используют общую схему с обязательной 
 Эти данные чувствительны: обычные логи не должны включать их сериализацию.
 
 По умолчанию реальные примеры разрешены только при `LOCAL_ONLY` и локальном provider.
-Для внешнего `FIXED` требуется `TabularImportOptions.external_approval` с
+Для собственного сервера `FIXED` с `ProviderCapabilities.trusted_model=True`
+разрешение на каждый файл не требуется: действуют те же лимиты и проверки
+плана. Классификация не понижается, RESTRICTED разрешён выбранной доверенной
+модели согласно [ADR 0041](adr/0041-trusted-model.md).
+Для недоверенного внешнего `FIXED` требуется `TabularImportOptions.external_approval` с
 `TabularExternalApproval`: fingerprints `TabularImportSource`, каталога, scope и
 router policy, а также разрешённые лимиты выборки. Trusted host создаёт DTO только
 после проверки отдельного явного согласия на эти данные, таблицу и получателя;

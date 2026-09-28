@@ -179,6 +179,67 @@ async def test_fixed_never_retries() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("trusted", [False, True])
+@pytest.mark.parametrize(
+    "mode",
+    [LLMRoutingMode.FIXED, LLMRoutingMode.LOCAL_ONLY, LLMRoutingMode.PRIVACY_FIRST],
+)
+async def test_trusted_remote_model_has_explicit_controlled_routing(
+    trusted: bool, mode: LLMRoutingMode
+) -> None:
+    remote = Deployment("remote", environment=LLMExecutionEnvironment.CLOUD)
+    remote._caps = remote.capabilities.model_copy(update={"trusted_model": trusted})
+    router = router_for((remote,), mode=mode)
+    request = approved_request(router, DataClassification.RESTRICTED)
+    if trusted:
+        assert (await router.generate_structured(request)).provider_id == "remote"
+        assert remote.fake.call_count == 1
+    else:
+        with pytest.raises(LLMProviderError, match="LLM_POLICY_DENIED"):
+            await router.generate_structured(request)
+        assert remote.fake.call_count == 0
+
+
+@pytest.mark.anyio
+async def test_trust_revocation_invalidates_route_binding() -> None:
+    remote = Deployment("remote", environment=LLMExecutionEnvironment.CLOUD)
+    remote._caps = remote.capabilities.model_copy(update={"trusted_model": True})
+    router = router_for((remote,), mode=LLMRoutingMode.FIXED)
+    request = approved_request(router, DataClassification.RESTRICTED)
+    remote._caps = remote.capabilities.model_copy(update={"trusted_model": False})
+    with pytest.raises(LLMProviderError):
+        await router.generate_structured(request)
+    assert remote.fake.call_count == 0
+
+
+@pytest.mark.parametrize("invalid", ["true", 1, None])
+def test_trust_flag_requires_explicit_boolean(invalid: object) -> None:
+    caps = Deployment("remote", environment=LLMExecutionEnvironment.CLOUD).capabilities
+    assert "trusted_model" not in caps.model_dump()
+    with pytest.raises(ValueError):
+        ProviderCapabilities.model_validate(
+            {**caps.model_dump(), "trusted_model": invalid}
+        )
+
+
+@pytest.mark.parametrize(
+    "environment", [LLMExecutionEnvironment.UNKNOWN, LLMExecutionEnvironment.DISABLED]
+)
+def test_trust_cannot_activate_unknown_or_disabled_destination(
+    environment: LLMExecutionEnvironment,
+) -> None:
+    caps = Deployment("remote").capabilities
+    with pytest.raises(ValueError):
+        ProviderCapabilities.model_validate(
+            {
+                **caps.model_dump(),
+                "trusted_model": True,
+                "execution_environment": environment,
+            }
+        )
+
+
+@pytest.mark.anyio
 async def test_no_llm_does_not_even_validate_payload() -> None:
     router = router_for((), mode=LLMRoutingMode.NO_LLM)
     with pytest.raises(LLMProviderError, match="LLM_POLICY_DENIED"):

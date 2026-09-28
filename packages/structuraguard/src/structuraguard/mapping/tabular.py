@@ -304,15 +304,16 @@ class TabularImportPlanner:
     """Составить copy/split план через разрешённую LLM с проверкой всех строк.
 
     Args:
-        router: Run-scoped router LOCAL_ONLY либо FIXED с external_approval.
+        router: LOCAL_ONLY либо FIXED с trusted_model или external_approval.
         scanner: Trusted base scanner; SDK самостоятельно добавляет injection veto.
         context: Identity router и нижние границы классификации.
         min_confidence: Минимальная уверенность плана и каждого выбора, default .85.
         options: Конечные лимиты выборки, каталога, payload и времени.
 
-    Сырые примеры внешнему FIXED-маршруту требуют отдельного согласия host на
-    конкретные данные, каталог и получателя. Известные secrets запрещены даже
-    локально; RESTRICTED внешнему provider запрещён. Конструктор не выполняет
+    Собственный сервер с trusted_model принимает новые файлы без per-file согласия.
+    Иной внешний FIXED-маршрут требует согласия на данные, каталог и получателя.
+    Известные secrets запрещены даже локально; RESTRICTED недоверенному provider
+    запрещён. Конструктор не выполняет
     I/O. SDK не загружает строки и не исполняет SQL; полученный план и derived JSON
     должны пройти штатный ingest. Один instance не допускает concurrent plan.
     """
@@ -375,7 +376,10 @@ class TabularImportPlanner:
             raise LLMProviderError(LLMErrorCode.BUDGET_EXCEEDED)
         if self._router.policy.mode is not LLMRoutingMode.LOCAL_ONLY and not (
             self._router.policy.mode is LLMRoutingMode.FIXED
-            and self._options.external_approval is not None
+            and (
+                self._router.trusted_model
+                or self._options.external_approval is not None
+            )
         ):
             raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
         self._busy = True
@@ -402,7 +406,10 @@ class TabularImportPlanner:
                 error_code="TABULAR_IMPORT_INPUT_INVALID",
                 message="Источник должен быть непустой прямоугольной таблицей.",
             ) from None
-        if self._router.policy.mode is LLMRoutingMode.FIXED:
+        if (
+            self._router.policy.mode is LLMRoutingMode.FIXED
+            and not self._router.trusted_model
+        ):
             self._check_external_approval(source, catalog, scope)
         targets = tabular_import_targets(catalog, scope)
         if (

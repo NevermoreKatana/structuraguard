@@ -8,16 +8,22 @@ from tests.fakes.pipeline import Stream
 from tests.fakes.semantic import Scanner, encoded, scenario
 
 from structuraguard import AsyncStructuraGuard
-from structuraguard.contracts import DataClassification, SemanticParsingMode
+from structuraguard.contracts import (
+    DataClassification,
+    ProviderCapabilities,
+    SemanticParsingMode,
+)
 from structuraguard.contracts import PipelineStatus as S
 from structuraguard.contracts._base import canonical_sha256_value
 from structuraguard.contracts.llm import (
     LLMBudget,
+    LLMExecutionEnvironment,
     LLMRoutePolicy,
     LLMRoutingMode,
     LLMRoutingPolicy,
 )
 from structuraguard.contracts.security import SecurityPolicy
+from structuraguard.exceptions import StructuraGuardError
 from structuraguard.llm import FakeLLMProvider, ScriptedResponse
 from structuraguard.parsers import ParserRegistry
 from structuraguard.parsers.builtin import DelimitedTextParser, PlainTextParser
@@ -91,6 +97,48 @@ async def test_no_llm_does_not_silently_change_llm_first() -> None:
     )
     assert result.status is S.NEEDS_REVIEW
     assert provider.call_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("trusted", [False, True])
+async def test_restricted_source_reaches_only_declared_trusted_remote_model(
+    trusted: bool,
+) -> None:
+    content = b"card,n\n4111111111111111,1\n4012888888881881,2\n"
+    _, _, proposed = await scenario(DelimitedTextParser(), content)
+
+    class RemoteProvider(FakeLLMProvider):
+        @property
+        def capabilities(self) -> ProviderCapabilities:
+            return super().capabilities.model_copy(
+                update={
+                    "execution_environment": LLMExecutionEnvironment.CLOUD,
+                    "trusted_model": trusted,
+                }
+            )
+
+    provider = RemoteProvider(
+        (ScriptedResponse(output_json=encoded(proposed)),), clock=fixed_clock
+    )
+    registry = ParserRegistry()
+    registry.register(DelimitedTextParser())
+    sdk = AsyncStructuraGuard(
+        parser_registry=registry,
+        dependencies=deps(provider, SemanticParsingMode.LLM_FIRST),
+    )
+    source = await sdk.inspect_source(
+        SourceRequest(stream=Stream(content), display_name="input.csv")
+    )
+    async with source:
+        if not trusted:
+            with pytest.raises(StructuraGuardError, match="LLM_DATA_ROUTING_FORBIDDEN"):
+                await sdk.create_parse_plan(source)
+            assert provider.call_count == 0
+        else:
+            plan = await sdk.create_parse_plan(source)
+            assert plan is not None and provider.call_count == 1
+            parsed = await sdk.parse_semantically(source, plan=plan)
+            assert parsed.report.records == 2
 
 
 @pytest.mark.anyio

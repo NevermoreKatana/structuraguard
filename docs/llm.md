@@ -277,12 +277,17 @@ policy: router проверяет её перед каждым attempt и про
 | --- | --- |
 | `fixed` | Ровно один configured provider; один attempt, без переключения. |
 | `no_llm` | `LLM_POLICY_DENIED`, ноль вызовов; позволяет caller выбрать deterministic branch. |
-| `local_only` | Только явно объявленные local deployments, порядок policy. |
-| `privacy_first` | Local перед cloud; confidential/restricted допускаются только local. |
+| `local_only` | Локальные и явно доверенные deployments под контролем оператора, порядок policy. |
+| `privacy_first` | Контролируемые deployments перед остальными; confidential/restricted допускаются в контролируемый контур. |
 | `fallback` | Разрешённые deployments в порядке policy. |
 
-Restricted никогда не уходит cloud, даже если ошибочно включён в cloud allowlist.
-Local restricted требует явного разрешения. Unknown/disabled locality не допускает
+Restricted не уходит недоверенному cloud, даже если включён в его allowlist.
+Для собственного сервера host явно задаёт `ProviderCapabilities(trusted_model=True,
+execution_environment="cloud", ...)`. Это означает разрешение владельца обрабатывать
+данные, включая RESTRICTED, на выбранном сервере. Флаг выключен по умолчанию,
+входит в capabilities fingerprint и не доверяет содержимому ответа модели.
+См. [ADR 0041](adr/0041-trusted-model.md).
+Restricted требует разрешения в route/config allowlists. Unknown/disabled locality не допускает
 egress. Отсутствие разрешённого provider даёт `LLM_POLICY_DENIED`; отсутствие нужных
 capabilities среди разрешённых — `LLM_CAPABILITY_MISMATCH`.
 В трёх режимах с переключением следующий разрешённый provider вызывается только

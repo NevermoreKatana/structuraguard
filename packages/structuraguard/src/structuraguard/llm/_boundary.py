@@ -67,12 +67,12 @@ def enforce_security_route(request: LLMRequest, caps: ProviderCapabilities) -> N
         or caps.tool_calling
         or (
             request.data_classification is DataClassification.RESTRICTED
-            and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+            and not caps.controlled_deployment
         )
     ) or (
         injection is not None
         and injection.action is InjectionAction.LOCAL_ONLY
-        and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+        and not caps.controlled_deployment
     ):
         raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
 

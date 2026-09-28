@@ -479,7 +479,7 @@ class LLMStructureAnalyzer:
             LLMExecutionEnvironment.CLOUD,
         } or (
             request.data_classification is DataClassification.RESTRICTED
-            and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+            and not caps.controlled_deployment
         ):
             raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
         if not caps.structured_output or request.purpose not in caps.supported_purposes:

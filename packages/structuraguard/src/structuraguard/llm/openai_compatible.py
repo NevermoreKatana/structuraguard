@@ -166,10 +166,10 @@ class OpenAICompatibleConfig(FrozenContract):
             raise ValueError("Требуется непустая уникальная classification allowlist")
         if (
             DataClassification.RESTRICTED in self.allowed_classifications
-            and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+            and not caps.controlled_deployment
         ):
             raise ValueError(
-                "Restricted разрешён только явно выбранному local deployment"
+                "Restricted разрешён только локальной или явно доверенной модели"
             )
         names = [header.name.lower() for header in self.headers]
         if len(set(names)) != len(names) or (
@@ -362,7 +362,7 @@ class OpenAICompatibleProvider:
         enforce_security_route(request, caps)
         if request.data_classification not in self._config.allowed_classifications or (
             request.data_classification is DataClassification.RESTRICTED
-            and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+            and not caps.controlled_deployment
         ):
             raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
         if request.purpose not in caps.supported_purposes:

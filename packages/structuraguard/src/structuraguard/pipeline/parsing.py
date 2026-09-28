@@ -4,7 +4,7 @@ from structuraguard.contracts._base import canonical_sha256_value
 from structuraguard.contracts.common import DataClassification
 from structuraguard.contracts.common import PipelineStatus as S
 from structuraguard.contracts.injection import InjectionAction
-from structuraguard.contracts.llm import LLMExecutionEnvironment, LLMRoutingMode
+from structuraguard.contracts.llm import LLMRoutingMode
 from structuraguard.contracts.normalized import NormalizedBatch
 from structuraguard.contracts.parsing import (
     ParsePlan,
@@ -244,7 +244,7 @@ async def analyze(
                 or caps.tool_calling
                 or (
                     privacy.classification is DataClassification.RESTRICTED
-                    and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+                    and not caps.controlled_deployment
                 )
                 or (
                     (
@@ -262,7 +262,7 @@ async def analyze(
                             for item in summaries
                         )
                     )
-                    and caps.execution_environment is not LLMExecutionEnvironment.LOCAL
+                    and not caps.controlled_deployment
                 )
             ):
                 raise deny("LLM_DATA_ROUTING_FORBIDDEN")

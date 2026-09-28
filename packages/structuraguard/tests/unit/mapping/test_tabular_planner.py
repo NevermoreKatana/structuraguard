@@ -109,6 +109,7 @@ def planner(
     *more_answers: str,
     mode: LLMRoutingMode = LLMRoutingMode.LOCAL_ONLY,
     cloud: bool = False,
+    trusted_model: bool = False,
     options: TabularImportOptions | None = None,
     min_confidence: Decimal = Decimal(".85"),
 ) -> tuple[TabularImportPlanner, RecordingScanner]:
@@ -123,7 +124,10 @@ def planner(
             @property
             def capabilities(self) -> ProviderCapabilities:
                 return super().capabilities.model_copy(
-                    update={"execution_environment": LLMExecutionEnvironment.CLOUD}
+                    update={
+                        "execution_environment": LLMExecutionEnvironment.CLOUD,
+                        "trusted_model": trusted_model,
+                    }
                 )
 
         provider = CloudProvider(
@@ -284,6 +288,36 @@ async def test_cloud_provider_cannot_receive_real_samples_even_with_local_policy
             catalog=db,
             scope=scope_for(db),
         )
+
+
+@pytest.mark.parametrize("value", ["001234", "666333", "4111111111111111"])
+async def test_trusted_remote_model_accepts_new_sources_without_file_consent(
+    value: str,
+) -> None:
+    db = catalog(table("t", column("value")))
+    sdk, scanner = planner(
+        output(target="c0"), cloud=True, trusted_model=True, mode=LLMRoutingMode.FIXED
+    )
+    plan = await sdk.plan(
+        labels=("value",), rows=({"value": value},), catalog=db, scope=scope_for(db)
+    )
+    assert plan.assignments[0].target.column_id == "value"
+    assert len(scanner.requests) == 1
+
+
+async def test_trusted_model_still_rejects_source_credentials() -> None:
+    db = catalog(table("t", column("value")))
+    sdk, scanner = planner(
+        output(target="c0"), cloud=True, trusted_model=True, mode=LLMRoutingMode.FIXED
+    )
+    with pytest.raises(LLMProviderError):
+        await sdk.plan(
+            labels=("api_key",),
+            rows=({"api_key": "synthetic-value"},),
+            catalog=db,
+            scope=scope_for(db),
+        )
+    assert scanner.requests == []
 
 
 @pytest.mark.parametrize(

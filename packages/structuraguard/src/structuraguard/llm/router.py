@@ -120,6 +120,15 @@ class PolicyAwareLLMRouter:
         """Суммарный неизрасходуемый повторно резерв всех начатых attempts."""
         return self._reserved_tokens
 
+    @property
+    def trusted_model(self) -> bool:
+        """Выбран ровно один deployment, явно отмеченный host как свой сервер."""
+        return (
+            self._policy.mode is LLMRoutingMode.FIXED
+            and len(self._caps) == 1
+            and self._caps[0].trusted_model
+        )
+
     def _remaining_ms(self) -> int:
         remaining = self._policy.budget.max_time_ms - max(
             0, int((self._monotonic() - self._start) * 1000)
@@ -148,7 +157,7 @@ class PolicyAwareLLMRouter:
             if caps.tool_calling or (
                 injection is not None
                 and injection.action is InjectionAction.LOCAL_ONLY
-                and environment is not LLMExecutionEnvironment.LOCAL
+                and not caps.controlled_deployment
             ):
                 continue
             if (
@@ -159,19 +168,19 @@ class PolicyAwareLLMRouter:
                 continue
             if (
                 request.data_classification is DataClassification.RESTRICTED
-                and environment is not LLMExecutionEnvironment.LOCAL
+                and not caps.controlled_deployment
             ):
                 continue
             if (
                 self._policy.mode is LLMRoutingMode.LOCAL_ONLY
-                and environment is not LLMExecutionEnvironment.LOCAL
+                and not caps.controlled_deployment
             ):
                 continue
             if (
                 self._policy.mode is LLMRoutingMode.PRIVACY_FIRST
                 and request.data_classification
                 in {DataClassification.CONFIDENTIAL, DataClassification.RESTRICTED}
-                and environment is not LLMExecutionEnvironment.LOCAL
+                and not caps.controlled_deployment
             ):
                 continue
             candidates.append(index)
@@ -179,10 +188,7 @@ class PolicyAwareLLMRouter:
             raise LLMProviderError(LLMErrorCode.POLICY_DENIED)
         if self._policy.mode is LLMRoutingMode.PRIVACY_FIRST:
             candidates.sort(
-                key=lambda index: (
-                    self._caps[index].execution_environment
-                    is not LLMExecutionEnvironment.LOCAL
-                )
+                key=lambda index: not self._caps[index].controlled_deployment
             )
         compatible = [
             index

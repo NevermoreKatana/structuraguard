@@ -1012,6 +1012,7 @@ class ProviderCapabilities(FrozenContract):
     max_output_bytes: Annotated[StrictInt, Field(ge=0, le=1_048_576)]
     json_schema: StrictBool = Field(default=False, exclude_if=lambda value: not value)
     tool_calling: StrictBool = Field(default=False, exclude_if=lambda value: not value)
+    trusted_model: StrictBool = Field(default=False, exclude_if=lambda value: not value)
     execution_environment: LLMExecutionEnvironment = Field(
         default=LLMExecutionEnvironment.UNKNOWN,
         exclude_if=lambda value: value == LLMExecutionEnvironment.UNKNOWN,
@@ -1029,6 +1030,11 @@ class ProviderCapabilities(FrozenContract):
     @model_validator(mode="after")
     def validate_purposes(self) -> Self:
         """Проверить purposes и согласованность disabled/token caps; иначе ValueError."""
+        if self.trusted_model and self.execution_environment not in {
+            LLMExecutionEnvironment.LOCAL,
+            LLMExecutionEnvironment.CLOUD,
+        }:
+            raise ValueError("Доверенная модель требует явно объявленный deployment")
         if self.execution_environment is LLMExecutionEnvironment.DISABLED:
             if (
                 self.structured_output
@@ -1059,6 +1065,18 @@ class ProviderCapabilities(FrozenContract):
         ):
             raise ValueError("Token limit превышает context window")
         return self
+
+    @property
+    def controlled_deployment(self) -> bool:
+        """Локальный либо явно объявленный собственный сервер оператора.
+
+        trusted_model задаёт trusted host по решению владельца сервера, никогда
+        не ответ модели. Флаг не означает доверие к выводам LLM, tools или SQL.
+        """
+        return self.execution_environment is LLMExecutionEnvironment.LOCAL or (
+            self.execution_environment is LLMExecutionEnvironment.CLOUD
+            and self.trusted_model
+        )
 
 
 class LLMRequest(FrozenContract):
