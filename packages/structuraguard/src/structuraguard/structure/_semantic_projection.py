@@ -69,7 +69,6 @@ def _fixed_array(items: list[_Schema]) -> _Schema:
     return {
         "type": "array",
         "prefixItems": items,
-        "items": False,
         "minItems": len(items),
         "maxItems": len(items),
     }
