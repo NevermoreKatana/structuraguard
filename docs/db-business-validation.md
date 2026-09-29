@@ -54,6 +54,12 @@ IDs запрещены. Неограниченный streaming здесь не �
 
 Отсутствие cell означает **missing**, `NullScalar` — **explicit null**. Значения
 строго tagged: bool не integer, строка даты не date, money не float.
+Для builtin PostgreSQL `JSON/JSONB` поддержаны native скаляры: string,
+integer, number и boolean. Строка сохраняется именно JSON-строкой, даже если
+содержит JSON-текст или Python repr; повторный разбор и выполнение не допускаются.
+`NullScalar` сохраняется как SQL NULL с проверкой nullable. Decimal, даты,
+domain/array types и JSON-ключи UNIQUE/FK не получают неявного преобразования.
+Эти правила едины для выбора кандидата, проверки плана, значений и writer.
 Нормализация, исправление типов, вычисление defaults, усечение, padding и
 округление не выполняются. Dataset — sidecar projection: исходные
 `NormalizedBatch`, raw values, normalization trace и provenance сохраняет caller.

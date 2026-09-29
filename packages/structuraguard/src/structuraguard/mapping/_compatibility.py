@@ -7,6 +7,10 @@ from structuraguard.contracts.common import DecimalScalar, IntegerScalar, Number
 from structuraguard.contracts.database import ColumnCatalog, DatabaseType
 from structuraguard.contracts.deterministic_mapping import CompatibilityStatus
 from structuraguard.contracts.profiling import NormalizedFieldProfile
+from structuraguard.domain.constraint_values import (
+    JSON_SCALAR_KINDS,
+    json_scalar_target,
+)
 
 from ._aliases import concepts
 from ._names import normalize_name
@@ -26,6 +30,20 @@ class PatternMatch:
     available: bool = False
     coverage: Decimal = Decimal(0)
     blockers: tuple[str, ...] = ()
+
+
+def json_scalar_compatible(
+    field: NormalizedFieldProfile, column: ColumnCatalog, dialect: str
+) -> bool:
+    """JSON принимает наблюдаемые native скаляры без вывода семантического типа."""
+    return (
+        column.inspection is not None
+        and json_scalar_target(column.inspection.data_type, dialect)
+        and field.entity_count > 0
+        and field.missing_count == 0
+        and sum(k.count for k in field.observed_kinds) == field.entity_count
+        and all(k.name in JSON_SCALAR_KINDS for k in field.observed_kinds if k.count)
+    )
 
 
 def null_text_compatible(field: NormalizedFieldProfile, column: ColumnCatalog) -> bool:
@@ -177,10 +195,12 @@ def type_compatibility(
 ) -> Compatibility:
     """Hard mismatch никогда не компенсируется lexical score; конверсий нет."""
     blockers: set[str] = set()
-    if field.inference.status != "resolved":
+    native_json = json_scalar_compatible(field, column, dialect)
+    if field.inference.status != "resolved" and not native_json:
         blockers.add("TYPE_EVIDENCE_INCOMPLETE")
     if any(
-        r in field.reasons or r in field.inference.reasons
+        (r in field.reasons or r in field.inference.reasons)
+        and not (native_json and r == "mixed_kinds")
         for r in (
             "mixed_kinds",
             "locale_ambiguity",
@@ -193,6 +213,8 @@ def type_compatibility(
         blockers.add("SOURCE_EVIDENCE_CONFLICT")
     if not column.nullable and field.null_count:
         blockers.add("REQUIRED_VALUE_MISSING")
+    if native_json:
+        return Compatibility("compatible", Decimal(1), tuple(sorted(blockers)))
     if null_text_compatible(field, column):
         blockers.discard("TYPE_EVIDENCE_INCOMPLETE")
         return Compatibility("compatible", Decimal(1), tuple(sorted(blockers)))

@@ -8,6 +8,7 @@ from structuraguard.contracts.mapping_rules import MappingIssueLocation
 from structuraguard.contracts.profiling import NormalizedFieldProfile
 
 from ._compatibility import (
+    json_scalar_compatible,
     null_text_compatible,
     serialized_scalar_compatible,
     type_compatibility,
@@ -88,8 +89,10 @@ def check_type(
         ):
             issues.add("MAPPING_TRANSFORMATION_REQUIRED", location)
         kinds = {k.name for k in profile.observed_kinds if k.count and k.name != "null"}
+        native_json = json_scalar_compatible(profile, column, dialect)
         if any(
-            r in profile.reasons or r in profile.inference.reasons
+            (r in profile.reasons or r in profile.inference.reasons)
+            and not (native_json and r == "mixed_kinds")
             for r in (
                 "mixed_kinds",
                 "locale_ambiguity",
@@ -100,6 +103,8 @@ def check_type(
             )
         ):
             issues.add("MAPPING_TYPE_UNVERIFIED", location)
+        if native_json:
+            return
         if null_text_compatible(profile, column):
             return
         if data_type.type_kind in {None, "builtin"} and serialized_scalar_compatible(

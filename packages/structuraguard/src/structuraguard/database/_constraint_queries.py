@@ -112,6 +112,7 @@ def statements(
 
 def _relation(table: TableCatalog, column_ids: tuple[str, ...]) -> Table:
     from sqlalchemy import (
+        JSON,
         BigInteger,
         Boolean,
         Column,
@@ -124,6 +125,7 @@ def _relation(table: TableCatalog, column_ids: tuple[str, ...]) -> Table:
         Table,
         Uuid,
     )
+    from sqlalchemy.dialects.postgresql import JSONB
 
     columns = {c.column_id: c for c in table.columns}
     relation = Table(table.name, MetaData(), schema=table.schema_name)
@@ -140,6 +142,10 @@ def _relation(table: TableCatalog, column_ids: tuple[str, ...]) -> Table:
             "datetime": DateTime(timezone=True),
             "uuid": Uuid(),
             "text": String(),
+            # None остаётся SQL NULL; строка не разбирается как JSON-документ.
+            "json": JSONB(none_as_null=True)
+            if column.inspection.data_type.native_type.casefold() == "jsonb"
+            else JSON(none_as_null=True),
         }
         relation.append_column(Column(column.name, sql_types[kind]))
     return relation

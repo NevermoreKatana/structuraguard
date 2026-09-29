@@ -381,7 +381,7 @@ def _target_value_codes(
     if value is None or column.inspection is None:
         return ()
     kind = base_type(column.inspection.data_type).canonical_type
-    if kind not in {"integer", "uuid", "date"}:
+    if kind not in {"integer", "uuid", "date", "json"}:
         return ()
     scalar: NormalizedScalar = StringScalar(value=value)
     if kind == "integer":

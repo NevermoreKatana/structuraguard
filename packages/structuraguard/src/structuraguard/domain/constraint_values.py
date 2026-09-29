@@ -17,6 +17,18 @@ from structuraguard.contracts.common import (
 )
 from structuraguard.contracts.database import ColumnCatalog, DatabaseType
 
+JSON_SCALAR_KINDS = frozenset({"string", "integer", "number", "boolean", "null"})
+
+
+def json_scalar_target(data_type: DatabaseType, dialect: str) -> bool:
+    """Только проверенные builtin PostgreSQL JSON/JSONB, без domain/array cast."""
+    return (
+        dialect == "postgresql"
+        and data_type.type_kind in {None, "builtin"}
+        and data_type.canonical_type == "json"
+        and data_type.native_type.casefold() in {"json", "jsonb"}
+    )
+
 
 def database_scalar(column: ColumnCatalog, value: NormalizedScalar) -> NormalizedScalar:
     """Связать каноническую ISO DATE с типом БД без изменения значения.
@@ -66,6 +78,18 @@ def field_codes(
     value = database_scalar(column, value)
     code: list[str] = []
     expected = dt.canonical_type
+    if expected == "json":
+        if not json_scalar_target(info.data_type, dialect):
+            return ("DB_CONSTRAINT_UNVERIFIED",)
+        if value.kind not in JSON_SCALAR_KINDS:
+            return ("DB_TYPE_MISMATCH",)
+        # Строка сохраняется JSON-строкой, даже если выглядит как JSON/Python.
+        # NUL и одиночные суррогаты недопустимы для PostgreSQL JSONB.
+        if isinstance(value, StringScalar) and any(
+            char == "\x00" or "\ud800" <= char <= "\udfff" for char in value.value
+        ):
+            return ("DB_VALUE_INVALID",)
+        return ()
     matches = {
         "integer": isinstance(value, IntegerScalar),
         "decimal": isinstance(value, IntegerScalar | DecimalScalar),
