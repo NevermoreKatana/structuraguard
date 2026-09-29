@@ -30,6 +30,7 @@ from structuraguard.contracts.source import (
     SourceLocation,
 )
 from structuraguard.exceptions import LLMProviderError, ParseExecutionError
+from structuraguard.parsers.builtin._log_detection import ISO_SYSLOG_EVENT
 from structuraguard.structure._log_json import JsonValue, decode_log_json
 from structuraguard.structure._stream import StreamCheck
 from structuraguard.structure.validation import (
@@ -304,9 +305,10 @@ def _log_json_shapes(
     entries: dict[str, CatalogEntry],
     samples: dict[PhysicalSourceRef, PhysicalSample],
     policy: LLMStructurePolicy,
-) -> list[CanonicalValue]:
+) -> tuple[list[CanonicalValue], list[CanonicalValue]]:
     """Группировать paths проверенных samples, без значений и догадок о типах."""
     groups: dict[tuple[tuple[str, ...], ...], list[CanonicalValue]] = {}
+    raw_records: list[CanonicalValue] = []
     for alias, entry in entries.items():
         sample = samples.get(entry.ref)
         if (
@@ -318,6 +320,10 @@ def _log_json_shapes(
         paths = _log_json_paths(sample.raw_value.value, policy)
         if paths is not None:
             groups.setdefault(paths, []).append(alias)
+        elif ISO_SYSLOG_EVENT.match(sample.raw_value.value) is not None:
+            # Подтверждённое отдельное syslog-событие сохраняется целиком.
+            # Продолжение stack trace без envelope не объявляется новой записью.
+            raw_records.append(alias)
     return [
         {
             "refs": refs,
@@ -326,7 +332,7 @@ def _log_json_shapes(
             "scalar_paths": [list(path) for path in paths],
         }
         for paths, refs in groups.items()
-    ]
+    ], raw_records
 
 
 async def prepare_samples(
@@ -542,9 +548,11 @@ async def prepare_samples(
             "max_entities": policy.max_entities,
         },
     }
-    shapes = _log_json_shapes(entries, samples, policy)
+    shapes, raw_records = _log_json_shapes(entries, samples, policy)
     if shapes:
         payload["log_json_shapes"] = shapes
+        if raw_records:
+            payload["log_raw_records"] = raw_records
     if len(canonical_json_value(payload).encode()) > policy.max_payload_bytes:
         raise LLMProviderError(LLMErrorCode.CONTEXT_LIMIT)
     return SemanticSampleCatalog(

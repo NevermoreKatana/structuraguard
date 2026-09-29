@@ -177,3 +177,54 @@ async def test_descriptor_bytes_remain_inside_existing_payload_budget() -> None:
             LLMStructurePolicy(max_payload_bytes=limit),
         )
     assert caught.value.error_code == LLMErrorCode.CONTEXT_LIMIT.value
+
+
+@pytest.mark.anyio
+async def test_unsampled_plain_line_is_not_declared_a_raw_event() -> None:
+    request, batches = await request_for('{"message":"started"}', "GET /health 200")
+    first = next(
+        sample
+        for sample in request.samples
+        if sample.source_ref.kind is PhysicalObjectKind.LINE
+    )
+    catalog = await prepare_samples(
+        request.model_copy(update={"samples": (first,)}),
+        lambda: stream(batches),
+        LLMStructurePolicy(),
+    )
+    assert "log_raw_records" not in catalog.payload
+    assert catalog.payload["log_json_shapes"] == [
+        {
+            "refs": ["r0"],
+            "selector": "log_json",
+            "offset": 0,
+            "scalar_paths": [["message"]],
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_continuation_line_does_not_become_a_single_raw_event() -> None:
+    content = b'2026-01-01T10:00:00Z node worker[101]: {"message":"failed"}\n  stack trace continuation\n'
+    source = source_for(content, display_name="events.log")
+    batches = await collect(LogParser(), source, contexts_for(source, content)[1])
+    analysis = await DeterministicStructureAnalyzer().analyze(stream(batches))
+    assert batches[-1].manifest is not None
+    request = StructureAnalysisRequest(
+        source=source.ref,
+        manifest=batches[-1].manifest,
+        profile=analysis.profile,
+        mode=SemanticParsingMode.LLM_FIRST,
+        samples=samples_for(batches),
+    )
+    catalog = await prepare_samples(
+        request, lambda: stream(batches), LLMStructurePolicy()
+    )
+    assert "log_raw_records" not in catalog.payload
+    from structuraguard.structure import semantic_response_schema
+
+    schema = semantic_response_schema()
+    assert (
+        schema.prepare_decoding(canonical_json_value(catalog.payload)).schema_json
+        == schema.schema_json
+    )

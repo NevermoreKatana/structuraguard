@@ -708,7 +708,7 @@ class HybridStructureAnalyzer:
 
     @staticmethod
     def _log_json_refinement(base: ParsePlan, proposed: ParsePlan) -> bool:
-        """После replay validation JSON-поля уточняют raw record без смены границ."""
+        """Проверенные варианты событий уточняют raw records без смены границ."""
         if not isinstance(base, LogParsePlan) or not isinstance(proposed, LogParsePlan):
             return False
         if (
@@ -718,22 +718,41 @@ class HybridStructureAnalyzer:
             or len(base.fields) != 1
             or not isinstance(base.fields[0].selector, LogRecordSelector)
             or len(base.entities) != 1
-            or len(proposed.entities) != 1
             or any(
-                not isinstance(field.selector, LogJsonSelector)
-                or field.selector.line_offset != 0
+                not isinstance(field.selector, LogJsonSelector | LogRecordSelector)
+                or (
+                    isinstance(field.selector, LogJsonSelector)
+                    and field.selector.line_offset != 0
+                )
                 for field in proposed.fields
             )
         ):
             return False
-        before, after = base.entities[0], proposed.entities[0]
+        before = base.entities[0]
+        if (
+            not isinstance(before.grouping, ExplicitRecordGrouping)
+            or before.parent_entity_id
+            or before.identity_field_ids
+        ):
+            return False
+        records: list[tuple[PhysicalSourceRef, ...]] = []
+        for entity in proposed.entities:
+            if (
+                not isinstance(entity.grouping, ExplicitRecordGrouping)
+                or entity.parent_entity_id
+                or entity.identity_field_ids
+            ):
+                return False
+            group = set(entity.grouping.records)
+            if entity.grouping.records != tuple(
+                record for record in before.grouping.records if record in group
+            ):
+                return False
+            records.extend(entity.grouping.records)
         return (
-            isinstance(before.grouping, ExplicitRecordGrouping)
-            and before.grouping == after.grouping
-            and before.parent_entity_id is None
-            and after.parent_entity_id is None
-            and not before.identity_field_ids
-            and not after.identity_field_ids
+            all(len(record) == 1 for record in records)
+            and len(records) == len(before.grouping.records)
+            and set(records) == set(before.grouping.records)
         )
 
     @staticmethod
